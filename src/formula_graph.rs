@@ -121,6 +121,14 @@ pub enum BooleanFunction {
     GreaterThan,
 }
 
+impl fmt::Display for BooleanFunction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            BooleanFunction::GreaterThan => write!(f, "Greater Than"),
+        }
+    }
+}
+
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Constrain {
     // has 1 input edge only and 0 output edges
@@ -136,7 +144,7 @@ impl Constrain {
 
 impl fmt::Debug for Constrain {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name)
+        write!(f, "{}, {}", self.name, self.op)
     }
 }
 
