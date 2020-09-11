@@ -1,0 +1,560 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Concept - Monster</title>
+        
+        
+
+
+        <!-- Custom HTML head -->
+        
+
+
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        
+        <link rel="icon" href="favicon.svg">
+        
+        
+        <link rel="shortcut icon" href="favicon.png">
+        
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        
+        <link rel="stylesheet" href="fonts/fonts.css">
+        
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        
+
+        
+        <!-- MathJax -->
+        <script async type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+        
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="concept_1.html"><strong aria-hidden="true">1.</strong> Concept</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                        
+                    </div>
+
+                    <h1 class="menu-title">Monster</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        
+                        <a href="https://github.com/cksystemsgroup/monster" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        
+                    </div>
+                </div>
+
+                
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" name="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1><a class="header" href="#prototype-concept" id="prototype-concept">Prototype Concept</a></h1>
+<p>Monster is a Symbolic Execution Engine for RISC-U binary code.
+Given a RISC-U binary and any pointer into the binary, 
+Monster can compute (with a high probability) a concrete input, 
+where the program would reach that point.
+On top of that Monster can also compute (with a high success probability)
+a input for a constrained memory location at a specific point in the binary.</p>
+<h2><a class="header" href="#machine-model" id="machine-model">Machine Model</a></h2>
+<p>In order to describe the engine, the following example of C* code will be used:</p>
+<p>Pseudocode:</p>
+<pre><code class="language-C">uint64_t input = ?;
+
+uint64_t x1 = input + 5;
+uint64_t x2 = 10;
+uint64_t x3 = x2 - x1;
+
+exit(x3);
+</code></pre>
+<p>RISC-U:</p>
+<pre><code>addi t0, zero, 10
+addi t1, a0, 5
+sub t1, t1, t0
+addi a0, t1, 0
+addi a7, zero, 93
+ecall
+</code></pre>
+<p>Now this code should be evaluated partially, where we differentiate between <em>Concrete</em> and <em>Symbolic values</em>. 
+Concrete values are of type unsigned 64-bit integer, whereas symbolic values only consist of a name (e.g. x0) for a SMT formula stored somewhere else.
+We will also use a <em>Uninitialized</em> value to model memory cells, which have not been initialized yet.
+Now we need to model the state of the machine to be able execute instructions for it.
+Keep in mind, that we defined, that our input is in register a0 and therefore this register has to contain already an symbolic value.</p>
+<table>
+<tr><th>Registers</th><th>Memory</th><th>Formula</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>a0</td><td>Symbolic(x0)</td></tr>
+</tbody></table>
+</td><td>
+<table><thead><tr><th>addr</th><th>value</th></tr></thead><tbody>
+<tr><td>-</td><td>-</td></tr>
+</tbody></table>
+</td><td> 
+<table><thead><tr><th>label</th><th>formula</th></tr></thead><tbody>
+<tr><td>x0</td><td>?</td></tr>
+</tbody></table>
+</td></tr> </table>
+<p>Every memory cell or register, which is not explicitly mentioned here is <em>Uninitialized</em>.
+Now the initial state of the machine is defined and we can start executing.</p>
+<h3><a class="header" href="#symbolic-execution" id="symbolic-execution">Symbolic Execution</a></h3>
+<p>Given the first instruction <code>addi t0, a0, 5</code>, the symbolic value in register a0 has to be added with a concrete value 5 and the result has to be stored in t0.
+For that we introduce a new label and store the formula </p>
+<p><code>addi t0, zero, 10</code>:</p>
+<table>
+<tr><th>Registers</th><th>Formula</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>a0</td><td>Symbolic(x0)</td></tr>
+<tr><td><strong>t1</strong></td><td><strong>Concrete(10)</strong></td></tr>
+</tbody></table>
+</td><td> 
+<table><thead><tr><th>label</th><th>formula</th></tr></thead><tbody>
+<tr><td>x0</td><td>?</td></tr>
+</tbody></table>
+</td></tr> </table>
+<p><code>addi t1, a0, 5</code>:</p>
+<table>
+<tr><th>Registers</th><th>Formula</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>a0</td><td>Symbolic(x0)</td></tr>
+<tr><td>t0</td><td>Concrete(10)</td></tr>
+<tr><td><strong>t1</strong></td><td><strong>Symbolic(x1)</strong></td></tr>
+</tbody></table>
+</td><td>
+<table><thead><tr><th>label</th><th>formula</th></tr></thead><tbody>
+<tr><td>x0</td><td>?</td></tr>
+<tr><td><strong>x1</strong></td><td><strong>x0 + 5</strong></td></tr>
+</tbody></table>
+</td></tr> </table>
+<p><code>sub t1, t1, t0</code>:</p>
+<table>
+<tr><th>Registers</th><th>Formula</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>a0</td><td>Symbolic(x0)</td></tr>
+<tr><td>t0</td><td>Symbolic(x1)</td></tr>
+<tr><td><strong>t1</strong></td><td><strong>Symbolic(x2)</strong></td></tr>
+</tbody></table>
+</td><td>
+<table><thead><tr><th>label</th><th>formula</th></tr></thead><tbody>
+<tr><td>x0</td><td>?</td></tr>
+<tr><td>x1</td><td>x0 + 5</td></tr>
+<tr><td><strong>x2</strong></td><td><strong>10 - x1</strong></td></tr>
+</tbody></table>
+</td></tr> </table>
+<p><code>addi a0, t1, 0</code>:</p>
+<table>
+<tr><th>Registers</th><th>Formula</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td><strong>a0</strong></td><td><strong>Symbolic(x2)</strong></td></tr>
+<tr><td>t0</td><td>Symbolic(x1)</td></tr>
+<tr><td>t1</td><td>Symbolic(x2)</td></tr>
+</tbody></table>
+</td><td>
+<table><thead><tr><th>label</th><th>formula</th></tr></thead><tbody>
+<tr><td>x0</td><td>?</td></tr>
+<tr><td>x1</td><td>x0 + 5</td></tr>
+<tr><td>x2</td><td>10 - x1</td></tr>
+</tbody></table>
+</td></tr> </table>
+<p><code>addi a7, zero, 93</code>:</p>
+<table>
+<tr><th>Registers</th><th>Formula</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>a0</td><td>Symbolic(x2)</td></tr>
+<tr><td><strong>a7</strong></td><td><strong>Concrete(93)</strong></td></tr>
+<tr><td>t0</td><td>Symbolic(x1)</td></tr>
+<tr><td>t1</td><td>Symbolic(x2)</td></tr>
+</tbody></table>
+</td><td>
+<table><thead><tr><th>label</th><th>formula</th></tr></thead><tbody>
+<tr><td>x0</td><td>?</td></tr>
+<tr><td>x1</td><td>x0 + 5</td></tr>
+<tr><td>x2</td><td>10 - x1</td></tr>
+</tbody></table>
+</td></tr> </table>
+<p><code>ecall</code>:</p>
+<table>
+<tr><th>Registers</th><th>Formula</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>a0</td><td>Symbolic(x0)</td></tr>
+<tr><td>t0</td><td>Symbolic(x1)</td></tr>
+<tr><td>t1</td><td>Concrete(10)</td></tr>
+<tr><td>a7</td><td>Concrete(93)</td></tr>
+</tbody></table>
+</td><td>
+<table><thead><tr><th>label</th><th>formula</th></tr></thead><tbody>
+<tr><td>x0</td><td>?</td></tr>
+<tr><td>x1</td><td>x0 + 5</td></tr>
+<tr><td>x2</td><td>10 - x1</td></tr>
+</tbody></table>
+</td></tr> </table>
+<p>After the exit ecall we have to decide, how the query to the SMT solver will look like.
+In this case an <code>exit_code &gt; 0</code> is interesting for us, because that is an error condition for a program.
+The <code>exit_code</code> at this point should be in register a0.
+Now that the constrain is defined and we now formula (x2), the SMT formula can be written down as following:
+<code>x1 = x0 + 5 and x2 = 10 - x1 and x2 &gt; 0</code></p>
+<p>We can now write SMT-lib down for this formula which would look like this:</p>
+<pre><code>(set-option :produce-models true)
+(set-option :incremental true)
+(set-logic QF_BV)
+
+(declare-fun x0 () (_ BitVec 64))      ; symbolic input x0 has no constrains (assert)
+
+(declare-fun x1 () (_ BitVec 64))
+(assert (= x1 (bvadd x0 (_ bv5 64))))  ; x1 = x0 + 5
+
+(declare-fun x2 () (_ BitVec 64))
+(assert (= x2 (bvsub (_ bv10 64) x1))) ; x2 = 10 - x1
+
+(assert (bvugt x2 (_ bv0 64)))         ; x2 &gt; 0
+
+(check-sat)
+(get-model)
+
+(exit)
+</code></pre>
+<p>Of course that is a very explicit representation of this formula. 
+Someone could easily rewrite that to the following formula and therefore omit many symbolic temporaries:</p>
+<p><code>10 - (x0 + 5) &gt; 0</code></p>
+<p>And for that reason, we do not use that tabular approach to represent the formula, but use a graph for that. 
+To be precise, we are using a data flow graph.</p>
+<h2><a class="header" href="#data-flow-graph" id="data-flow-graph">Data Flow Graph</a></h2>
+<p>Using the example from before, we can show all the intermediate graphs during program execution:</p>
+<pre><code>addi t0, zero, 10
+addi t1, a0, 5
+</code></pre>
+<div><!-- Generated by graphviz version 2.43.0 (0)
+ --><!-- Title: %3 Pages: 1 --><svg width="234pt" height="131pt"
+ viewBox="0.00 0.00 233.99 131.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 127)"><title>%3</title><polygon fill="white" stroke="transparent" points="-4,4 -4,-127 229.99,-127 229.99,4 -4,4"/><!-- Input(x0) --><g id="node1" class="node"><title>Input(x0)</title><ellipse fill="none" stroke="black" cx="53.95" cy="-105" rx="53.89" ry="18"/><text text-anchor="middle" x="53.95" y="-101.3" font-family="Times,serif" font-size="14.00">Input(x0)</text></g><!-- Instruction(addi) --><g id="node2" class="node"><title>Instruction(addi)</title><ellipse fill="none" stroke="black" cx="114.95" cy="-18" rx="89.08" ry="18"/><text text-anchor="middle" x="114.95" y="-14.3" font-family="Times,serif" font-size="14.00">Instruction(addi)</text></g><!-- Input(x0)&#45;&gt;Instruction(addi) --><g id="edge1" class="edge"><title>Input(x0)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M66,-87.21C74.8,-74.95 86.87,-58.11 96.83,-44.24"/><polygon fill="black" stroke="black" points="99.72,-46.21 102.71,-36.05 94.04,-42.13 99.72,-46.21"/><text text-anchor="middle" x="99.95" y="-57.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Const(5) --><g id="node3" class="node"><title>Const(5)</title><ellipse fill="none" stroke="black" cx="175.95" cy="-105" rx="50.09" ry="18"/><text text-anchor="middle" x="175.95" y="-101.3" font-family="Times,serif" font-size="14.00">Const(5)</text></g><!-- Const(5)&#45;&gt;Instruction(addi) --><g id="edge2" class="edge"><title>Const(5)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M163.89,-87.21C155.1,-74.95 143.02,-58.11 133.06,-44.24"/><polygon fill="black" stroke="black" points="135.85,-42.13 127.18,-36.05 130.17,-46.21 135.85,-42.13"/><text text-anchor="middle" x="160.95" y="-57.8" font-family="Times,serif" font-size="14.00">rhs</text></g></g></svg></div>
+<pre><code>sub t1, t1, t0
+</code></pre>
+<div><!-- Generated by graphviz version 2.43.0 (0)
+ --><!-- Title: %3 Pages: 1 --><svg width="342pt" height="218pt"
+ viewBox="0.00 0.00 341.84 218.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 214)"><title>%3</title><polygon fill="white" stroke="transparent" points="-4,4 -4,-214 337.84,-214 337.84,4 -4,4"/><!-- Input(x0) --><g id="node1" class="node"><title>Input(x0)</title><ellipse fill="none" stroke="black" cx="53.95" cy="-192" rx="53.89" ry="18"/><text text-anchor="middle" x="53.95" y="-188.3" font-family="Times,serif" font-size="14.00">Input(x0)</text></g><!-- Instruction(addi) --><g id="node2" class="node"><title>Instruction(addi)</title><ellipse fill="none" stroke="black" cx="114.95" cy="-105" rx="89.08" ry="18"/><text text-anchor="middle" x="114.95" y="-101.3" font-family="Times,serif" font-size="14.00">Instruction(addi)</text></g><!-- Input(x0)&#45;&gt;Instruction(addi) --><g id="edge1" class="edge"><title>Input(x0)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M66,-174.21C74.8,-161.95 86.87,-145.11 96.83,-131.24"/><polygon fill="black" stroke="black" points="99.72,-133.21 102.71,-123.05 94.04,-129.13 99.72,-133.21"/><text text-anchor="middle" x="99.95" y="-144.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Instruction(sub) --><g id="node4" class="node"><title>Instruction(sub)</title><ellipse fill="none" stroke="black" cx="195.95" cy="-18" rx="85.29" ry="18"/><text text-anchor="middle" x="195.95" y="-14.3" font-family="Times,serif" font-size="14.00">Instruction(sub)</text></g><!-- Instruction(addi)&#45;&gt;Instruction(sub) --><g id="edge3" class="edge"><title>Instruction(addi)&#45;&gt;Instruction(sub)</title><path fill="none" stroke="black" d="M130.95,-87.21C142.93,-74.63 159.49,-57.25 172.9,-43.18"/><polygon fill="black" stroke="black" points="175.61,-45.41 179.98,-35.76 170.54,-40.58 175.61,-45.41"/><text text-anchor="middle" x="171.95" y="-57.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Const(5) --><g id="node3" class="node"><title>Const(5)</title><ellipse fill="none" stroke="black" cx="175.95" cy="-192" rx="50.09" ry="18"/><text text-anchor="middle" x="175.95" y="-188.3" font-family="Times,serif" font-size="14.00">Const(5)</text></g><!-- Const(5)&#45;&gt;Instruction(addi) --><g id="edge2" class="edge"><title>Const(5)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M163.89,-174.21C155.1,-161.95 143.02,-145.11 133.06,-131.24"/><polygon fill="black" stroke="black" points="135.85,-129.13 127.18,-123.05 130.17,-133.21 135.85,-129.13"/><text text-anchor="middle" x="160.95" y="-144.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Const(10) --><g id="node5" class="node"><title>Const(10)</title><ellipse fill="none" stroke="black" cx="277.95" cy="-105" rx="55.79" ry="18"/><text text-anchor="middle" x="277.95" y="-101.3" font-family="Times,serif" font-size="14.00">Const(10)</text></g><!-- Const(10)&#45;&gt;Instruction(sub) --><g id="edge4" class="edge"><title>Const(10)&#45;&gt;Instruction(sub)</title><path fill="none" stroke="black" d="M262.13,-87.61C250.04,-75.07 233.17,-57.59 219.49,-43.41"/><polygon fill="black" stroke="black" points="221.73,-40.69 212.27,-35.92 216.69,-45.55 221.73,-40.69"/><text text-anchor="middle" x="251.95" y="-57.8" font-family="Times,serif" font-size="14.00">lhs</text></g></g></svg></div>
+<pre><code>addi a0, t1, 0
+addi a7, zero, 93
+ecall
+</code></pre>
+<div><!-- Generated by graphviz version 2.43.0 (0)
+ --><!-- Title: %3 Pages: 1 --><svg width="407pt" height="305pt"
+ viewBox="0.00 0.00 406.99 305.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 301)"><title>%3</title><polygon fill="white" stroke="transparent" points="-4,4 -4,-301 402.99,-301 402.99,4 -4,4"/><!-- Input(x0) --><g id="node1" class="node"><title>Input(x0)</title><ellipse fill="none" stroke="black" cx="53.95" cy="-279" rx="53.89" ry="18"/><text text-anchor="middle" x="53.95" y="-275.3" font-family="Times,serif" font-size="14.00">Input(x0)</text></g><!-- Instruction(addi) --><g id="node2" class="node"><title>Instruction(addi)</title><ellipse fill="none" stroke="black" cx="114.95" cy="-192" rx="89.08" ry="18"/><text text-anchor="middle" x="114.95" y="-188.3" font-family="Times,serif" font-size="14.00">Instruction(addi)</text></g><!-- Input(x0)&#45;&gt;Instruction(addi) --><g id="edge1" class="edge"><title>Input(x0)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M66,-261.21C74.8,-248.95 86.87,-232.11 96.83,-218.24"/><polygon fill="black" stroke="black" points="99.72,-220.21 102.71,-210.05 94.04,-216.13 99.72,-220.21"/><text text-anchor="middle" x="99.95" y="-231.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Instruction(sub) --><g id="node4" class="node"><title>Instruction(sub)</title><ellipse fill="none" stroke="black" cx="195.95" cy="-105" rx="85.29" ry="18"/><text text-anchor="middle" x="195.95" y="-101.3" font-family="Times,serif" font-size="14.00">Instruction(sub)</text></g><!-- Instruction(addi)&#45;&gt;Instruction(sub) --><g id="edge3" class="edge"><title>Instruction(addi)&#45;&gt;Instruction(sub)</title><path fill="none" stroke="black" d="M130.95,-174.21C142.93,-161.63 159.49,-144.25 172.9,-130.18"/><polygon fill="black" stroke="black" points="175.61,-132.41 179.98,-122.76 170.54,-127.58 175.61,-132.41"/><text text-anchor="middle" x="171.95" y="-144.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Const(5) --><g id="node3" class="node"><title>Const(5)</title><ellipse fill="none" stroke="black" cx="175.95" cy="-279" rx="50.09" ry="18"/><text text-anchor="middle" x="175.95" y="-275.3" font-family="Times,serif" font-size="14.00">Const(5)</text></g><!-- Const(5)&#45;&gt;Instruction(addi) --><g id="edge2" class="edge"><title>Const(5)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M163.89,-261.21C155.1,-248.95 143.02,-232.11 133.06,-218.24"/><polygon fill="black" stroke="black" points="135.85,-216.13 127.18,-210.05 130.17,-220.21 135.85,-216.13"/><text text-anchor="middle" x="160.95" y="-231.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Constrain(&gt;) --><g id="node6" class="node"><title>Constrain(&gt;)</title><ellipse fill="none" stroke="black" cx="271.95" cy="-18" rx="70.69" ry="18"/><text text-anchor="middle" x="271.95" y="-14.3" font-family="Times,serif" font-size="14.00">Constrain(&gt;)</text></g><!-- Instruction(sub)&#45;&gt;Constrain(&gt;) --><g id="edge5" class="edge"><title>Instruction(sub)&#45;&gt;Constrain(&gt;)</title><path fill="none" stroke="black" d="M210.96,-87.21C222.1,-74.75 237.46,-57.57 249.97,-43.57"/><polygon fill="black" stroke="black" points="252.9,-45.55 256.96,-35.76 247.69,-40.88 252.9,-45.55"/><text text-anchor="middle" x="248.95" y="-57.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Const(10) --><g id="node5" class="node"><title>Const(10)</title><ellipse fill="none" stroke="black" cx="277.95" cy="-192" rx="55.79" ry="18"/><text text-anchor="middle" x="277.95" y="-188.3" font-family="Times,serif" font-size="14.00">Const(10)</text></g><!-- Const(10)&#45;&gt;Instruction(sub) --><g id="edge4" class="edge"><title>Const(10)&#45;&gt;Instruction(sub)</title><path fill="none" stroke="black" d="M262.13,-174.61C250.04,-162.07 233.17,-144.59 219.49,-130.41"/><polygon fill="black" stroke="black" points="221.73,-127.69 212.27,-122.92 216.69,-132.55 221.73,-127.69"/><text text-anchor="middle" x="251.95" y="-144.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Const(0) --><g id="node7" class="node"><title>Const(0)</title><ellipse fill="none" stroke="black" cx="348.95" cy="-105" rx="50.09" ry="18"/><text text-anchor="middle" x="348.95" y="-101.3" font-family="Times,serif" font-size="14.00">Const(0)</text></g><!-- Const(0)&#45;&gt;Constrain(&gt;) --><g id="edge6" class="edge"><title>Const(0)&#45;&gt;Constrain(&gt;)</title><path fill="none" stroke="black" d="M334.1,-87.61C322.67,-74.99 306.7,-57.36 293.8,-43.13"/><polygon fill="black" stroke="black" points="296.32,-40.69 287.01,-35.63 291.13,-45.39 296.32,-40.69"/><text text-anchor="middle" x="326.95" y="-57.8" font-family="Times,serif" font-size="14.00">rhs</text></g></g></svg></div>
+<p>With this graph as result, an SMT formula can trivially be constructed by building an formula for every &quot;Constrain&quot; node. 
+An algorithm could start at a constrain and track all it's input edges to build the formula.
+This gives us a way more concise SMT formula:</p>
+<pre><code>(set-option :produce-models true)
+(set-option :incremental true)
+(set-logic QF_BV)
+
+(declare-fun x0 () (_ BitVec 64))      
+(assert (bvugt (bvsub (_ bv10 64) (bvadd x0 (_ bv5 64))) (_ bv0 64)))
+; 10 - (x0 + 5) &gt; 0
+
+(check-sat)
+(get-model)
+
+(exit)
+</code></pre>
+<h2><a class="header" href="#control-flow" id="control-flow">Control Flow</a></h2>
+<p>Up until now, there was now control flow statement involved in our program. 
+In this section, I will describe control flow in our symbolic execution engine.
+Monster generates a so called Control Flow Graph, which encaptures all possible execution paths of a program in a graph.
+Let's take a different example with non-trivial control flow:</p>
+<p>Here is the C pseudo code of the program:</p>
+<pre><code class="language-C">uint64_t input = ?;
+uint64_t x1 = input + 5;
+uint64_t x2 = 10;
+
+uint64_t exit_code;
+if (x1 == x2)
+  exit_code = x2;
+else
+  exit_code = x1;
+
+exit(exit_code);
+</code></pre>
+<p>RISC-V</p>
+<pre><code>addi t0, zero, 10
+addi t1, a0, 5
+beq t0, t1, 2
+sd sp(0), t0
+jal zero, 2
+sd sp(0), t1
+ld sp(0), a0
+addi a7, zero, 93
+ecall
+</code></pre>
+<p>The control flow graph for this program looks like this:</p>
+<div><!-- Generated by graphviz version 2.43.0 (0)
+ --><!-- Title: %3 Pages: 1 --><svg width="301pt" height="604pt"
+ viewBox="0.00 0.00 300.66 604.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 600)"><title>%3</title><polygon fill="white" stroke="transparent" points="-4,4 -4,-600 296.66,-600 296.66,4 -4,4"/><!-- addi(t0, zero, 10) --><g id="node1" class="node"><title>addi(t0, zero, 10)</title><ellipse fill="none" stroke="black" cx="137.66" cy="-578" rx="90.98" ry="18"/><text text-anchor="middle" x="137.66" y="-574.3" font-family="Times,serif" font-size="14.00">addi(t0, zero, 10)</text></g><!-- addi(t1, a0, 5) --><g id="node2" class="node"><title>addi(t1, a0, 5)</title><ellipse fill="none" stroke="black" cx="137.66" cy="-505" rx="76.09" ry="18"/><text text-anchor="middle" x="137.66" y="-501.3" font-family="Times,serif" font-size="14.00">addi(t1, a0, 5)</text></g><!-- addi(t0, zero, 10)&#45;&gt;addi(t1, a0, 5) --><g id="edge1" class="edge"><title>addi(t0, zero, 10)&#45;&gt;addi(t1, a0, 5)</title><path fill="none" stroke="black" d="M137.66,-559.81C137.66,-551.79 137.66,-542.05 137.66,-533.07"/><polygon fill="black" stroke="black" points="141.16,-533.03 137.66,-523.03 134.16,-533.03 141.16,-533.03"/></g><!-- beq(t0, t1, 2) --><g id="node3" class="node"><title>beq(t0, t1, 2)</title><ellipse fill="none" stroke="black" cx="137.66" cy="-432" rx="71.49" ry="18"/><text text-anchor="middle" x="137.66" y="-428.3" font-family="Times,serif" font-size="14.00">beq(t0, t1, 2)</text></g><!-- addi(t1, a0, 5)&#45;&gt;beq(t0, t1, 2) --><g id="edge2" class="edge"><title>addi(t1, a0, 5)&#45;&gt;beq(t0, t1, 2)</title><path fill="none" stroke="black" d="M137.66,-486.81C137.66,-478.79 137.66,-469.05 137.66,-460.07"/><polygon fill="black" stroke="black" points="141.16,-460.03 137.66,-450.03 134.16,-460.03 141.16,-460.03"/></g><!-- sd(sp(0), t0) --><g id="node4" class="node"><title>sd(sp(0), t0)</title><ellipse fill="none" stroke="black" cx="89.66" cy="-345" rx="67.69" ry="18"/><text text-anchor="middle" x="89.66" y="-341.3" font-family="Times,serif" font-size="14.00">sd(sp(0), t0)</text></g><!-- beq(t0, t1, 2)&#45;&gt;sd(sp(0), t0) --><g id="edge3" class="edge"><title>beq(t0, t1, 2)&#45;&gt;sd(sp(0), t0)</title><path fill="none" stroke="black" d="M127.94,-413.8C121.13,-401.74 111.91,-385.4 104.22,-371.79"/><polygon fill="black" stroke="black" points="107.16,-369.87 99.19,-362.89 101.06,-373.31 107.16,-369.87"/><text text-anchor="middle" x="63.5" y="-394.2" font-family="Times,serif" font-size="14.00">reg(t0) != reg(t1)</text></g><!-- sd(sp(0), t1) --><g id="node5" class="node"><title>sd(sp(0), t1)</title><ellipse fill="none" stroke="black" cx="184.66" cy="-291" rx="67.69" ry="18"/><text text-anchor="middle" x="184.66" y="-287.3" font-family="Times,serif" font-size="14.00">sd(sp(0), t1)</text></g><!-- beq(t0, t1, 2)&#45;&gt;sd(sp(0), t1) --><g id="edge4" class="edge"><title>beq(t0, t1, 2)&#45;&gt;sd(sp(0), t1)</title><path fill="none" stroke="black" d="M145.8,-413.96C152.07,-400.37 160.66,-380.75 166.66,-363 171.47,-348.74 175.68,-332.49 178.82,-319.14"/><polygon fill="black" stroke="black" points="182.29,-319.67 181.09,-309.14 175.46,-318.12 182.29,-319.67"/><text text-anchor="middle" x="226.16" y="-384.8" font-family="Times,serif" font-size="14.00">reg(t0) == reg(t1)</text></g><!-- jal(zero, 2) --><g id="node7" class="node"><title>jal(zero, 2)</title><ellipse fill="none" stroke="black" cx="95.66" cy="-237" rx="60.39" ry="18"/><text text-anchor="middle" x="95.66" y="-233.3" font-family="Times,serif" font-size="14.00">jal(zero, 2)</text></g><!-- sd(sp(0), t0)&#45;&gt;jal(zero, 2) --><g id="edge6" class="edge"><title>sd(sp(0), t0)&#45;&gt;jal(zero, 2)</title><path fill="none" stroke="black" d="M90.62,-326.97C91.56,-310.38 93,-284.88 94.1,-265.43"/><polygon fill="black" stroke="black" points="97.6,-265.52 94.67,-255.34 90.61,-265.13 97.6,-265.52"/></g><!-- ld(sp(0), a0) --><g id="node6" class="node"><title>ld(sp(0), a0)</title><ellipse fill="none" stroke="black" cx="139.66" cy="-164" rx="66.89" ry="18"/><text text-anchor="middle" x="139.66" y="-160.3" font-family="Times,serif" font-size="14.00">ld(sp(0), a0)</text></g><!-- sd(sp(0), t1)&#45;&gt;ld(sp(0), a0) --><g id="edge5" class="edge"><title>sd(sp(0), t1)&#45;&gt;ld(sp(0), a0)</title><path fill="none" stroke="black" d="M180.63,-272.83C177.04,-258.3 171.32,-237.02 164.66,-219 161.27,-209.85 156.98,-200.1 152.92,-191.44"/><polygon fill="black" stroke="black" points="155.97,-189.71 148.48,-182.21 149.66,-192.74 155.97,-189.71"/></g><!-- addi(a7, zero, 93) --><g id="node8" class="node"><title>addi(a7, zero, 93)</title><ellipse fill="none" stroke="black" cx="139.66" cy="-91" rx="92.08" ry="18"/><text text-anchor="middle" x="139.66" y="-87.3" font-family="Times,serif" font-size="14.00">addi(a7, zero, 93)</text></g><!-- ld(sp(0), a0)&#45;&gt;addi(a7, zero, 93) --><g id="edge8" class="edge"><title>ld(sp(0), a0)&#45;&gt;addi(a7, zero, 93)</title><path fill="none" stroke="black" d="M139.66,-145.81C139.66,-137.79 139.66,-128.05 139.66,-119.07"/><polygon fill="black" stroke="black" points="143.16,-119.03 139.66,-109.03 136.16,-119.03 143.16,-119.03"/></g><!-- jal(zero, 2)&#45;&gt;ld(sp(0), a0) --><g id="edge7" class="edge"><title>jal(zero, 2)&#45;&gt;ld(sp(0), a0)</title><path fill="none" stroke="black" d="M106.08,-219.17C111.32,-210.72 117.78,-200.29 123.63,-190.85"/><polygon fill="black" stroke="black" points="126.7,-192.54 129,-182.2 120.75,-188.85 126.7,-192.54"/></g><!-- ecall --><g id="node9" class="node"><title>ecall</title><ellipse fill="none" stroke="black" cx="139.66" cy="-18" rx="32.49" ry="18"/><text text-anchor="middle" x="139.66" y="-14.3" font-family="Times,serif" font-size="14.00">ecall</text></g><!-- addi(a7, zero, 93)&#45;&gt;ecall --><g id="edge9" class="edge"><title>addi(a7, zero, 93)&#45;&gt;ecall</title><path fill="none" stroke="black" d="M139.66,-72.81C139.66,-64.79 139.66,-55.05 139.66,-46.07"/><polygon fill="black" stroke="black" points="143.16,-46.03 139.66,-36.03 136.16,-46.03 143.16,-46.03"/></g></g></svg></div>
+<p>It is a straight forward Control Flow Graph, where every node is a RISC-U instruction and an edge encodes an optional constrain when branch decisions are made.</p>
+<h3><a class="header" href="#candidate-path" id="candidate-path">Candidate Path</a></h3>
+<p>With Monster we restrict our engine to execute one full path from program entry point to a specified exit point at a time.
+This implies, that we have to generate so called candidate paths, which are execute symbolically.
+Candidate paths are the result of computing all shortest paths in of the control flow graph.</p>
+<p>So for our example the first candidate path to be executed is:</p>
+<div><!-- Generated by graphviz version 2.43.0 (0)
+ --><!-- Title: %3 Pages: 1 --><svg width="236pt" height="496pt"
+ viewBox="0.00 0.00 236.29 496.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 492)"><title>%3</title><polygon fill="white" stroke="transparent" points="-4,4 -4,-492 232.29,-492 232.29,4 -4,4"/><!-- addi(t0, zero, 10) --><g id="node1" class="node"><title>addi(t0, zero, 10)</title><ellipse fill="none" stroke="black" cx="92.29" cy="-470" rx="90.98" ry="18"/><text text-anchor="middle" x="92.29" y="-466.3" font-family="Times,serif" font-size="14.00">addi(t0, zero, 10)</text></g><!-- addi(t1, a0, 5) --><g id="node2" class="node"><title>addi(t1, a0, 5)</title><ellipse fill="none" stroke="black" cx="92.29" cy="-397" rx="76.09" ry="18"/><text text-anchor="middle" x="92.29" y="-393.3" font-family="Times,serif" font-size="14.00">addi(t1, a0, 5)</text></g><!-- addi(t0, zero, 10)&#45;&gt;addi(t1, a0, 5) --><g id="edge1" class="edge"><title>addi(t0, zero, 10)&#45;&gt;addi(t1, a0, 5)</title><path fill="none" stroke="black" d="M92.29,-451.81C92.29,-443.79 92.29,-434.05 92.29,-425.07"/><polygon fill="black" stroke="black" points="95.79,-425.03 92.29,-415.03 88.79,-425.03 95.79,-425.03"/></g><!-- beq(t0, t1, 2) --><g id="node3" class="node"><title>beq(t0, t1, 2)</title><ellipse fill="none" stroke="black" cx="92.29" cy="-324" rx="71.49" ry="18"/><text text-anchor="middle" x="92.29" y="-320.3" font-family="Times,serif" font-size="14.00">beq(t0, t1, 2)</text></g><!-- addi(t1, a0, 5)&#45;&gt;beq(t0, t1, 2) --><g id="edge2" class="edge"><title>addi(t1, a0, 5)&#45;&gt;beq(t0, t1, 2)</title><path fill="none" stroke="black" d="M92.29,-378.81C92.29,-370.79 92.29,-361.05 92.29,-352.07"/><polygon fill="black" stroke="black" points="95.79,-352.03 92.29,-342.03 88.79,-352.03 95.79,-352.03"/></g><!-- sd(sp(0), t1) --><g id="node4" class="node"><title>sd(sp(0), t1)</title><ellipse fill="none" stroke="black" cx="92.29" cy="-237" rx="67.69" ry="18"/><text text-anchor="middle" x="92.29" y="-233.3" font-family="Times,serif" font-size="14.00">sd(sp(0), t1)</text></g><!-- beq(t0, t1, 2)&#45;&gt;sd(sp(0), t1) --><g id="edge3" class="edge"><title>beq(t0, t1, 2)&#45;&gt;sd(sp(0), t1)</title><path fill="none" stroke="black" d="M92.29,-305.8C92.29,-294.16 92.29,-278.55 92.29,-265.24"/><polygon fill="black" stroke="black" points="95.79,-265.18 92.29,-255.18 88.79,-265.18 95.79,-265.18"/><text text-anchor="middle" x="160.29" y="-276.8" font-family="Times,serif" font-size="14.00"> &#160;reg(t0) != reg(t1)</text></g><!-- ld(sp(0), a0) --><g id="node5" class="node"><title>ld(sp(0), a0)</title><ellipse fill="none" stroke="black" cx="92.29" cy="-164" rx="66.89" ry="18"/><text text-anchor="middle" x="92.29" y="-160.3" font-family="Times,serif" font-size="14.00">ld(sp(0), a0)</text></g><!-- sd(sp(0), t1)&#45;&gt;ld(sp(0), a0) --><g id="edge4" class="edge"><title>sd(sp(0), t1)&#45;&gt;ld(sp(0), a0)</title><path fill="none" stroke="black" d="M92.29,-218.81C92.29,-210.79 92.29,-201.05 92.29,-192.07"/><polygon fill="black" stroke="black" points="95.79,-192.03 92.29,-182.03 88.79,-192.03 95.79,-192.03"/></g><!-- addi(a7, zero, 93) --><g id="node6" class="node"><title>addi(a7, zero, 93)</title><ellipse fill="none" stroke="black" cx="92.29" cy="-91" rx="92.08" ry="18"/><text text-anchor="middle" x="92.29" y="-87.3" font-family="Times,serif" font-size="14.00">addi(a7, zero, 93)</text></g><!-- ld(sp(0), a0)&#45;&gt;addi(a7, zero, 93) --><g id="edge5" class="edge"><title>ld(sp(0), a0)&#45;&gt;addi(a7, zero, 93)</title><path fill="none" stroke="black" d="M92.29,-145.81C92.29,-137.79 92.29,-128.05 92.29,-119.07"/><polygon fill="black" stroke="black" points="95.79,-119.03 92.29,-109.03 88.79,-119.03 95.79,-119.03"/></g><!-- ecall --><g id="node7" class="node"><title>ecall</title><ellipse fill="none" stroke="black" cx="92.29" cy="-18" rx="32.49" ry="18"/><text text-anchor="middle" x="92.29" y="-14.3" font-family="Times,serif" font-size="14.00">ecall</text></g><!-- addi(a7, zero, 93)&#45;&gt;ecall --><g id="edge6" class="edge"><title>addi(a7, zero, 93)&#45;&gt;ecall</title><path fill="none" stroke="black" d="M92.29,-72.81C92.29,-64.79 92.29,-55.05 92.29,-46.07"/><polygon fill="black" stroke="black" points="95.79,-46.03 92.29,-36.03 88.79,-46.03 95.79,-46.03"/></g></g></svg></div>
+<p>At this point, this path can be executed symbolically simialarly to the first example.
+The only difference is, that we have encoded an additional constrain (<code>reg(t0) == reg(t1)</code>) at one point in the path.</p>
+<h3><a class="header" href="#conditional-symbolic-branching" id="conditional-symbolic-branching">Conditional Symbolic Branching</a></h3>
+<p>So let's execute it symbolically and inspect the system state.</p>
+<pre><code>addi t0, a0, 5
+addi t1, zero, 10
+beq t0, t1, 2
+</code></pre>
+<table>
+<tr><th>Registers</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>a0</td><td>Symbolic(x0)</td></tr>
+<tr><td>t0</td><td>Concrete(10)</td></tr>
+<tr><td>t1</td><td>Symbolic(x1)</td></tr>
+</tbody></table>
+</td></tr> </table>
+<div><!-- Generated by graphviz version 2.43.0 (0)
+ --><!-- Title: %3 Pages: 1 --><svg width="342pt" height="218pt"
+ viewBox="0.00 0.00 341.84 218.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 214)"><title>%3</title><polygon fill="white" stroke="transparent" points="-4,4 -4,-214 337.84,-214 337.84,4 -4,4"/><!-- Input(x0) --><g id="node1" class="node"><title>Input(x0)</title><ellipse fill="none" stroke="black" cx="53.95" cy="-192" rx="53.89" ry="18"/><text text-anchor="middle" x="53.95" y="-188.3" font-family="Times,serif" font-size="14.00">Input(x0)</text></g><!-- Instruction(addi) --><g id="node2" class="node"><title>Instruction(addi)</title><ellipse fill="none" stroke="black" cx="114.95" cy="-105" rx="89.08" ry="18"/><text text-anchor="middle" x="114.95" y="-101.3" font-family="Times,serif" font-size="14.00">Instruction(addi)</text></g><!-- Input(x0)&#45;&gt;Instruction(addi) --><g id="edge1" class="edge"><title>Input(x0)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M66,-174.21C74.8,-161.95 86.87,-145.11 96.83,-131.24"/><polygon fill="black" stroke="black" points="99.72,-133.21 102.71,-123.05 94.04,-129.13 99.72,-133.21"/><text text-anchor="middle" x="99.95" y="-144.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Constrain(!=) --><g id="node4" class="node"><title>Constrain(!=)</title><ellipse fill="none" stroke="black" cx="195.95" cy="-18" rx="74.99" ry="18"/><text text-anchor="middle" x="195.95" y="-14.3" font-family="Times,serif" font-size="14.00">Constrain(!=)</text></g><!-- Instruction(addi)&#45;&gt;Constrain(!=) --><g id="edge3" class="edge"><title>Instruction(addi)&#45;&gt;Constrain(!=)</title><path fill="none" stroke="black" d="M130.95,-87.21C142.93,-74.63 159.49,-57.25 172.9,-43.18"/><polygon fill="black" stroke="black" points="175.61,-45.41 179.98,-35.76 170.54,-40.58 175.61,-45.41"/><text text-anchor="middle" x="171.95" y="-57.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Const(5) --><g id="node3" class="node"><title>Const(5)</title><ellipse fill="none" stroke="black" cx="175.95" cy="-192" rx="50.09" ry="18"/><text text-anchor="middle" x="175.95" y="-188.3" font-family="Times,serif" font-size="14.00">Const(5)</text></g><!-- Const(5)&#45;&gt;Instruction(addi) --><g id="edge2" class="edge"><title>Const(5)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M163.89,-174.21C155.1,-161.95 143.02,-145.11 133.06,-131.24"/><polygon fill="black" stroke="black" points="135.85,-129.13 127.18,-123.05 130.17,-133.21 135.85,-129.13"/><text text-anchor="middle" x="160.95" y="-144.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Const(10) --><g id="node5" class="node"><title>Const(10)</title><ellipse fill="none" stroke="black" cx="277.95" cy="-105" rx="55.79" ry="18"/><text text-anchor="middle" x="277.95" y="-101.3" font-family="Times,serif" font-size="14.00">Const(10)</text></g><!-- Const(10)&#45;&gt;Constrain(!=) --><g id="edge4" class="edge"><title>Const(10)&#45;&gt;Constrain(!=)</title><path fill="none" stroke="black" d="M262.13,-87.61C249.96,-74.99 232.95,-57.36 219.22,-43.13"/><polygon fill="black" stroke="black" points="221.45,-40.4 211.99,-35.63 216.41,-45.26 221.45,-40.4"/><text text-anchor="middle" x="251.95" y="-57.8" font-family="Times,serif" font-size="14.00">lhs</text></g></g></svg></div>
+<p>Execution of this path begins to differ when a <code>beq</code> instruction is reached.
+For this instruction a constrain has to be modeled in the dataflow graph.
+This constrain is part of the so called &quot;path condition&quot;.
+It reflects the decision made when branching.</p>
+<p>After branching we have to symbolically execute a <code>sd</code> instruction.</p>
+<h2><a class="header" href="#memory-access" id="memory-access">Memory Access</a></h2>
+<p><code>sd sp(0), t0</code></p>
+<p>So far, I did not discuss the stack pointer at all, but the stack pointer in this case is clearly needed to calculate the address of the memory access.
+A big question here is, what kind of value (symbolic/concrete) the stack pointer has.
+For a concrete stack pointer value, the instruction has the same semantics as in normal execution.
+In Monster we initialize the stack pointer with a concrete value depending on the memory size.
+Also in RISC-U programs, if the stack pointer is intialized with a concrete value, it always stays concrete by construction (Selfie cstar).</p>
+<p><strong>Monster can not handle symbolic addresses for a memory access!</strong></p>
+<p>So for this example, <code>sd</code> and <code>ld</code> have the exact same semantics as in normal execution.
+This gives us the following end result:</p>
+<pre><code>jal zero, 2
+ld sp(0), a0
+addi a7, zero, 93
+ecall
+</code></pre>
+<table>
+<tr><th>Registers</th><th>Memory</th></tr>
+<tr><td>
+<table><thead><tr><th>reg</th><th>value</th></tr></thead><tbody>
+<tr><td>zero</td><td>Concrete(0)</td></tr>
+<tr><td>sp</td><td>Concrete(248)</td></tr>
+<tr><td>a0</td><td>Symbolic(x1)</td></tr>
+<tr><td>t0</td><td>Concrete(10)</td></tr>
+<tr><td>t1</td><td>Symbolic(x1)</td></tr>
+<tr><td>a7</td><td>Concrete(93)</td></tr>
+</tbody></table>
+</td><td>
+</td><td>
+<table><thead><tr><th>addr</th><th>value</th></tr></thead><tbody>
+<tr><td>248</td><td>Symbolic(x1)</td></tr>
+</tbody></table>
+</td></tr> </table>
+<div><!-- Generated by graphviz version 2.43.0 (0)
+ --><!-- Title: %3 Pages: 1 --><svg width="434pt" height="218pt"
+ viewBox="0.00 0.00 433.94 218.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 214)"><title>%3</title><polygon fill="white" stroke="transparent" points="-4,4 -4,-214 429.94,-214 429.94,4 -4,4"/><!-- Input(x0) --><g id="node1" class="node"><title>Input(x0)</title><ellipse fill="none" stroke="black" cx="157.9" cy="-192" rx="53.89" ry="18"/><text text-anchor="middle" x="157.9" y="-188.3" font-family="Times,serif" font-size="14.00">Input(x0)</text></g><!-- Instruction(addi) --><g id="node2" class="node"><title>Instruction(addi)</title><ellipse fill="none" stroke="black" cx="218.9" cy="-105" rx="89.08" ry="18"/><text text-anchor="middle" x="218.9" y="-101.3" font-family="Times,serif" font-size="14.00">Instruction(addi)</text></g><!-- Input(x0)&#45;&gt;Instruction(addi) --><g id="edge1" class="edge"><title>Input(x0)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M169.95,-174.21C178.75,-161.95 190.82,-145.11 200.78,-131.24"/><polygon fill="black" stroke="black" points="203.67,-133.21 206.66,-123.05 197.99,-129.13 203.67,-133.21"/><text text-anchor="middle" x="203.9" y="-144.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Constrain(!=) --><g id="node4" class="node"><title>Constrain(!=)</title><ellipse fill="none" stroke="black" cx="137.9" cy="-18" rx="74.99" ry="18"/><text text-anchor="middle" x="137.9" y="-14.3" font-family="Times,serif" font-size="14.00">Constrain(!=)</text></g><!-- Instruction(addi)&#45;&gt;Constrain(!=) --><g id="edge3" class="edge"><title>Instruction(addi)&#45;&gt;Constrain(!=)</title><path fill="none" stroke="black" d="M202.89,-87.21C190.91,-74.63 174.35,-57.25 160.94,-43.18"/><polygon fill="black" stroke="black" points="163.3,-40.58 153.86,-35.76 158.23,-45.41 163.3,-40.58"/><text text-anchor="middle" x="195.9" y="-57.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Constrain(&gt;) --><g id="node6" class="node"><title>Constrain(&gt;)</title><ellipse fill="none" stroke="black" cx="338.9" cy="-18" rx="70.69" ry="18"/><text text-anchor="middle" x="338.9" y="-14.3" font-family="Times,serif" font-size="14.00">Constrain(&gt;)</text></g><!-- Instruction(addi)&#45;&gt;Constrain(&gt;) --><g id="edge5" class="edge"><title>Instruction(addi)&#45;&gt;Constrain(&gt;)</title><path fill="none" stroke="black" d="M242.03,-87.61C260.63,-74.44 286.93,-55.81 307.44,-41.28"/><polygon fill="black" stroke="black" points="309.69,-43.97 315.83,-35.34 305.65,-38.26 309.69,-43.97"/><text text-anchor="middle" x="296.9" y="-57.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Const(5) --><g id="node3" class="node"><title>Const(5)</title><ellipse fill="none" stroke="black" cx="279.9" cy="-192" rx="50.09" ry="18"/><text text-anchor="middle" x="279.9" y="-188.3" font-family="Times,serif" font-size="14.00">Const(5)</text></g><!-- Const(5)&#45;&gt;Instruction(addi) --><g id="edge2" class="edge"><title>Const(5)&#45;&gt;Instruction(addi)</title><path fill="none" stroke="black" d="M267.84,-174.21C259.04,-161.95 246.97,-145.11 237.01,-131.24"/><polygon fill="black" stroke="black" points="239.8,-129.13 231.13,-123.05 234.12,-133.21 239.8,-129.13"/><text text-anchor="middle" x="265.9" y="-144.8" font-family="Times,serif" font-size="14.00">rhs</text></g><!-- Const(10) --><g id="node5" class="node"><title>Const(10)</title><ellipse fill="none" stroke="black" cx="55.9" cy="-105" rx="55.79" ry="18"/><text text-anchor="middle" x="55.9" y="-101.3" font-family="Times,serif" font-size="14.00">Const(10)</text></g><!-- Const(10)&#45;&gt;Constrain(!=) --><g id="edge4" class="edge"><title>Const(10)&#45;&gt;Constrain(!=)</title><path fill="none" stroke="black" d="M71.71,-87.61C83.88,-74.99 100.89,-57.36 114.62,-43.13"/><polygon fill="black" stroke="black" points="117.43,-45.26 121.85,-35.63 112.39,-40.4 117.43,-45.26"/><text text-anchor="middle" x="112.9" y="-57.8" font-family="Times,serif" font-size="14.00">lhs</text></g><!-- Const(0) --><g id="node7" class="node"><title>Const(0)</title><ellipse fill="none" stroke="black" cx="375.9" cy="-105" rx="50.09" ry="18"/><text text-anchor="middle" x="375.9" y="-101.3" font-family="Times,serif" font-size="14.00">Const(0)</text></g><!-- Const(0)&#45;&gt;Constrain(&gt;) --><g id="edge6" class="edge"><title>Const(0)&#45;&gt;Constrain(&gt;)</title><path fill="none" stroke="black" d="M368.41,-86.8C363.24,-74.93 356.28,-58.93 350.41,-45.45"/><polygon fill="black" stroke="black" points="353.57,-43.95 346.37,-36.18 347.15,-46.74 353.57,-43.95"/><text text-anchor="middle" x="370.9" y="-57.8" font-family="Times,serif" font-size="14.00">rhs</text></g></g></svg></div>
+<p>Now that this results in 2 constrains, SMT-lib looks kind of different for this graph.
+2 assertions have to be made.
+One comes from the path condition (<code>reg(t0) != reg(t1)</code>) and one is our output constrain (<code>reg(a0) &gt; 0</code>).</p>
+<pre><code>(set-option :produce-models true)
+(set-option :incremental true)
+(set-logic QF_BV)
+
+(declare-fun x0 () (_ BitVec 64))      ; symbolic input x0 has no constrains (assert)
+
+(assert (not (= (bvadd x0 (_ bv5 64)) (_ bv10 64)))) ; path constrain
+
+(assert (bvugt (bvadd x0 (_ bv5 64)) (_ bv0 64))) ; output constrain
+
+(check-sat)
+(get-model)
+
+(exit)
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                        
+
+                        
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                
+
+                
+            </nav>
+
+        </div>
+
+        
+
+        
+
+        
+
+        
+        <script type="text/javascript">
+            window.playground_copyable = true;
+        </script>
+        
+
+        
+
+        
+        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        
+
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        
+
+        
+
+    </body>
+</html>
