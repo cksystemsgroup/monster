@@ -25,7 +25,7 @@ uint64_t main() {
     a = a + (*x * 0);
 
   if (a == 42)
-    return a;
+    return 1;
   else
-    return *x;
+    return 0;
 }
