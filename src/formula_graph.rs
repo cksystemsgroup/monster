@@ -672,12 +672,12 @@ mod tests {
             .arg("cksystemsteaching/selfie")
             .arg("/opt/selfie/selfie")
             .arg("-c")
-            .arg("/opt/monster/symbolic/simple-if-else-1-35.c")
+            .arg("/opt/monster/symbolic/simple-if-else-symbolic-exit.c")
             .arg("-o")
-            .arg("/opt/monster/symbolic/simple-if-else-1-35.riscu.o")
+            .arg("/opt/monster/symbolic/simple-if-else-symbolic-exit.riscu.o")
             .output();
 
-        let test_file = Path::new("symbolic/simple-if-else-1-35.riscu.o");
+        let test_file = Path::new("symbolic/simple-if-else-symbolic-exit.riscu.o");
 
         let (graph, data_segment, elf_metadata) = cfg::build_from_file(test_file).unwrap();
 
