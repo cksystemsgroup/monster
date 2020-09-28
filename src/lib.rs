@@ -1,4 +1,5 @@
 pub mod bitvec;
+pub mod boolector;
 pub mod candidate_path;
 pub mod cfg;
 pub mod dead_code_elimination;
@@ -8,6 +9,5 @@ pub mod elf;
 pub mod engine;
 pub mod formula_graph;
 pub mod iterator;
-pub mod smt;
 pub mod solver;
 pub mod ternary;
