@@ -16,7 +16,7 @@ fn is_invertable(
     x: TernaryBitVector,
     s: BitVector,
     t: BitVector,
-    _d: ArgumentSide,
+    d: ArgumentSide,
 ) -> bool {
     match instruction {
         Instruction::Add(_) | Instruction::Addi(_) => x.mcb(t - s),
@@ -29,6 +29,31 @@ fn is_invertable(
             ((-s | s) & t == t)
                 && (s == BitVector(0) || (!s.odd() || x.mcb(t * s.modinverse().unwrap())))
                 && (s.odd() || (x << s.ctz()).mcb(y(s, t) << s.ctz()))
+        }
+        Instruction::Divu(i) => {
+            if d == ArgumentSide::Lhs {
+                // x / s = t
+                let c = addo(BitVector(1), t);
+                if (s * t) / s == t {
+                    if t == BitVector(0) {
+                        if !(x.0 < s) {
+                            false
+                        }
+                    }
+
+                    // assumed t == 0 => xlo < s
+
+                    if t != BitVector(0) && s != BitVector(0){
+                        
+                    }
+                    true
+                } else {
+                    false
+                }
+            } else {
+                // s / x = t
+
+            }
         }
         _ => unimplemented!(),
     }
