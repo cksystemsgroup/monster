@@ -4,15 +4,13 @@ uint64_t main() {
   uint64_t  i;
   uint64_t* x;
 
-  a = 43;
-  b = 2;
+  a = 2;
+
   x = malloc(8);
 
   read(0, x, 8);
 
-  a = a * *x;
+  a = *x - a;
 
-  b = b + a; 
-
-  return b;
+  return a;
 }
