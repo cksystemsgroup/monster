@@ -33,7 +33,6 @@ fn is_invertable(
         Instruction::Divu(i) => {
             if d == ArgumentSide::Lhs {
                 // x / s = t
-                let c = addo(BitVector(1), t);
                 if (s * t) / s == t {
                     if t == BitVector(0) {
                         if !(x.0 < s) {
@@ -41,18 +40,60 @@ fn is_invertable(
                         }
                     }
 
-                    // assumed t == 0 => xlo < s
+                    // assumed: t == 0 implies xlo < s
 
                     if t != BitVector(0) && s != BitVector(0){
-                        
+                        let c = mulo(s, t + BitVector(1)) || addo(BitVector(1), t);
+                        if c {
+                            true
+                        } else {
+                            let y = x.constant_bits();
+                            if y < s * t + BitVector(1) {
+                                // assumed: c implies y <= ones
+                                // where ones is lenght of x, this just checks that x and y have the same lenght
+                                true
+                            }
+                        }
                     }
+
                     true
                 } else {
                     false
                 }
             } else {
                 // s / x = t
+                if s / (s / t) == t {
+                    if t != BitVector::ones() {
+                        if !(x.1 > 0) {
+                            false
+                        }
 
+                        if s != BitVector(0) || t != BitVector(0) {
+                            if !(s / x.1 < t) {
+                                false
+                            }
+                        }
+
+                        if t == BitVector::ones() {
+                            let y = x.constant_bits();
+                            if !(y >= BitVector(0) && y <= s / t) {
+                                false
+                            }
+                        }
+
+                        if t != BitVector::ones() {
+                            let y = x.constant_bits();
+                            if !(y > t + 1 && y <= s / t) {
+                                false
+                            }
+                        }
+
+                        true
+                    }
+
+                } else {
+                    false
+                }
             }
         }
         _ => unimplemented!(),
@@ -85,6 +126,39 @@ fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) ->
             (!(t != BitVector(0)) || (x.1 != BitVector(0)))
                 && (!t.odd() || (x.1.lsb() != 0))
                 && (t.odd() || value_exists(x, t))
+        }
+        Instruction::Divu(_) => {
+            // x/s = t
+            if d == ArgumentSide::Lhs {
+                if t == BitVector::ones() {
+                    if !(x.1 >= t) {
+                        false
+                    }
+                }
+
+                if t == BitVector(0) {
+                    if !(x.0 != BitVector::ones()){
+                        false
+                    }
+                }
+
+                if t != BitVector(0) {
+                    if t != Bitvector::ones() {
+                        if t != BitVector(1) {
+                            if !x.mcb(t) {
+                                if mulo(BitVector(2), t){
+                                    false
+                                }
+                                if!()
+                            }
+                        }
+                    }
+                }
+
+                true
+            } else {
+                //s/x = t
+            }
         }
         _ => unimplemented!(),
     }
