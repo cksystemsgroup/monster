@@ -83,7 +83,7 @@ fn is_invertable(
 
                         if t != BitVector::ones() {
                             let y = x.constant_bits();
-                            if !(y > t + 1 && y <= s / t) {
+                            if !(y > t + BitVector(1) && y <= s / t) {
                                 false
                             }
                         }
@@ -149,7 +149,33 @@ fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) ->
                                 if mulo(BitVector(2), t){
                                     false
                                 }
-                                if!()
+                                //this currently only works for ranges NOT for ternary vectors
+                                //TODO: adopt an EFFICIENT way to do this for ternary vectors
+                                let y = t / x.1;
+                                if t * y < x.0 {
+                                    let o = x.0 - t * y;
+                                } else {
+                                    let o = BitVector(0);
+                                }
+                                let o = x.1 - t * y;
+
+                                if y == BitVector(0) {
+                                    false
+                                }
+
+                                //c = min(y-1,x.1-y*t)
+                                // o>=c
+                                if o > y - BitVector(1) || o > x.1 - y * t {
+                                    false
+                                }
+
+                                if mulo(y, t) {
+                                    false
+                                }
+
+                                if addo(y*t, o) {
+                                    false
+                                }
                             }
                         }
                     }
