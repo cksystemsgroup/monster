@@ -157,7 +157,6 @@ fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) ->
                                 } else {
                                     let o = BitVector(0);
                                 }
-                                let o = x.1 - t * y;
 
                                 if y == BitVector(0) {
                                     false
@@ -183,7 +182,30 @@ fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) ->
 
                 true
             } else {
-                //s/x = t
+                // s/x = t
+                if t == BitVector::ones() {
+                    if !(x.mcb(BitVector(0)) || x.mcb(BitVector(1))) {
+                        false
+                    }
+                }
+                if t != BitVector::ones() {
+                    if mulo(x.0, t) {
+                        false
+                    }
+                    let y = x.constant_bits();
+                    if y == BitVector(0) {
+                        // (!x.1+BitVector(1) & x.1) is a BitVector with one the first set bit from x.1 set
+                        // Which when added to x.0 is the next bigger BitVector with x.mcb(y) true
+                        let y = y + (!x.1+BitVector(1) & x.1);
+                        if y == BitVector(0) {
+                            false
+                        }
+                    }
+                    if mulo(y, t) {
+                        false
+                    }
+                    true
+                }
             }
         }
         _ => unimplemented!(),

@@ -109,6 +109,14 @@ impl Not for BitVector {
     }
 }
 
+pub fn addo(s: BitVector, t: BitVector) -> bool {
+    s.0.overflowing_add(t.0).1
+}
+
+pub fn mulo(s: BitVector, t: BitVector) -> bool {
+    s.0.overflowing_mul(t.0).1
+}
+
 impl fmt::Debug for BitVector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn bit_to_char(x: &BitVector, b: u32) -> char {
