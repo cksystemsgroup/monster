@@ -93,13 +93,7 @@ mod tests {
             .for_each(|(p, d)| {
                 let number_of_beqs = p
                     .into_iter()
-                    .filter(|i| {
-                        if let Instruction::Beq(_) = i {
-                            true
-                        } else {
-                            false
-                        }
-                    })
+                    .filter(|i| matches!(i, Instruction::Beq(_)))
                     .count();
                 let number_of_decisions = d.len();
 

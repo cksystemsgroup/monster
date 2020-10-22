@@ -402,7 +402,7 @@ impl<'a> DataFlowGraphBuilder<'a> {
                 let to_add = 8 - (size % 8);
                 let words_read = (size + to_add) / 8;
 
-                for i in 0..words_read {
+                for i in 0..words_read - 1 {
                     let name = format!("read({}, {}, {})", 0, buffer, size);
                     let node = Node::Input(Input::new(name));
                     let node_idx = self.graph.add_node(node);

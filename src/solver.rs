@@ -122,10 +122,7 @@ fn select(
     let (lhs, rhs) = parents(f, idx);
 
     fn is_constant(f: &Formula, n: NodeIndex) -> bool {
-        match f[n] {
-            Node::Constant(_) => true,
-            _ => false,
-        }
+        matches!(f[n], Node::Constant(_))
     }
 
     #[allow(clippy::if_same_then_else)]
