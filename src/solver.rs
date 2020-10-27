@@ -34,6 +34,52 @@ fn is_invertable(
     }
 }
 
+fn is_invertable_predicate(
+    instruction: Instruction,
+    x: TernaryBitVector,
+    s: BitVector,
+    t: bool,
+    _d: ArgumentSide,
+) -> bool {
+    match instruction {
+        Instruction::Sltu(_) => {
+            // (x<s) = t
+            if _d == ArgumentSide::Lhs {
+                if t {
+                    if s == BitVector(0) {
+                        false
+                    }
+                    if s > x.0 {
+                        false
+                    }
+                } else {
+                    if x.1 <= s {
+                        false
+                    }
+                }
+                true
+
+            // (s<x) = t
+            } else {
+                if t {
+                    if s == BitVector::ones() {
+                        false
+                    }
+                    if s > x.1 {
+                        false
+                    }
+                } else {
+                    if x.0 > s {
+                        false
+                    }
+                }
+               true
+            }
+        }
+        _ => unimplemented!(),
+    }
+}
+
 fn is_constraint_invertable(
     bf: BooleanFunction,
     _x: TernaryBitVector,
@@ -60,6 +106,28 @@ fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) ->
             (!(t != BitVector(0)) || (x.1 != BitVector(0)))
                 && (!t.odd() || (x.1.lsb() != 0))
                 && (t.odd() || value_exists(x, t))
+        }
+        _ => unimplemented!(),
+    }
+}
+fn is_consistent_predicate(instruction: Instruction, x: TernaryBitVector, t: bool, _d: ArgumentSide,) -> bool {
+    match instruction {
+        Instruction::Sltu(_) => {
+            if _d == ArgumentSide::Lhs {
+                if t {
+                    if x.0 == BitVector::ones() {
+                        false
+                    }
+                }
+                true
+            } else {
+                if t {
+                    if x.1 == BitVector(0) {
+                        false
+                    }
+                }
+                true
+            }
         }
         _ => unimplemented!(),
     }
