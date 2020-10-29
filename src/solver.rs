@@ -30,50 +30,37 @@ fn is_invertable(
                 && (s == BitVector(0) || (!s.odd() || x.mcb(t * s.modinverse().unwrap())))
                 && (s.odd() || (x << s.ctz()).mcb(y(s, t) << s.ctz()))
         }
-        _ => unimplemented!(),
-    }
-}
-
-fn is_invertable_predicate(
-    instruction: Instruction,
-    x: TernaryBitVector,
-    s: BitVector,
-    t: bool,
-    _d: ArgumentSide,
-) -> bool {
-    match instruction {
         Instruction::Sltu(_) => {
             // (x<s) = t
             if _d == ArgumentSide::Lhs {
-                if t {
+                if t == BitVector::ones() {
                     if s == BitVector(0) {
-                        false
+                        return false
                     }
                     if s > x.0 {
-                        false
+                        return false
                     }
                 } else {
                     if x.1 <= s {
-                        false
+                        return false
                     }
                 }
-                true
-
+                return true
             // (s<x) = t
             } else {
-                if t {
+                if t == BitVector::ones() {
                     if s == BitVector::ones() {
-                        false
+                        return false
                     }
                     if s > x.1 {
-                        false
+                        return false
                     }
                 } else {
                     if x.0 > s {
-                        false
+                        return false
                     }
                 }
-               true
+                return true
             }
         }
         _ => unimplemented!(),
@@ -107,26 +94,21 @@ fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) ->
                 && (!t.odd() || (x.1.lsb() != 0))
                 && (t.odd() || value_exists(x, t))
         }
-        _ => unimplemented!(),
-    }
-}
-fn is_consistent_predicate(instruction: Instruction, x: TernaryBitVector, t: bool, _d: ArgumentSide,) -> bool {
-    match instruction {
         Instruction::Sltu(_) => {
             if _d == ArgumentSide::Lhs {
-                if t {
+                if t == BitVector::ones() {
                     if x.0 == BitVector::ones() {
-                        false
+                        return false
                     }
                 }
-                true
+                return true
             } else {
-                if t {
+                if t == BitVector::ones() {
                     if x.1 == BitVector(0) {
-                        false
+                        return false
                     }
                 }
-                true
+                return true
             }
         }
         _ => unimplemented!(),
@@ -242,6 +224,30 @@ fn compute_inverse_value(
 
             (result_with_arbitrary & !x.constant_bit_mask()) | x.constant_bits()
         }
+        Instruction::Sltu(_) => {
+            if _d == ArgumentSide::Lhs {
+                // x<s == false
+                // therefore we need a random x that's x.1>=x>=s
+                if t == BitVector(0) {
+                    BitVector(rng.sample(s.0..=x.1.0))
+                // x<s == true
+                // therefore we need a random x that's s>x>=x.0
+                } else {
+                    BitVector(rng.sample(x.0.0..s.0))
+                }
+            } else {
+                // s<x == false
+                // therefore we need a random x that's s>=x>=x.0
+                if t == BitVector(0) {
+                    BitVector(rng.sample(x.0.0..=s.0))
+                // s<x == true
+                // therefore we need a random x that's x.1>=x>s
+                } else {
+                    BitVector(rng.sample(s.0+1..=x.1.0))
+                }
+
+            }
+        }
         _ => unimplemented!(),
     }
 }
@@ -280,6 +286,34 @@ fn compute_consistent_value(
                 r as u64
             }
         }),
+        //TODO: compute consistent value of sltu
+        Instruction::Sltu(_) => {
+            if _d == ArgumentSide::Lhs {
+                // x<s == false
+                if t == BitVector(0) {
+                    BitVector(rng.sample(x.0.0..=x.1.0))
+                // x<s == true
+                } else {
+                    if x.1 == BitVector::ones() {
+                        BitVector(rng.sample(x.0.0..x.1.0))
+                    } else {
+                        BitVector(rng.sample(x.0.0..=x.1.0))
+                    }
+                }
+            } else {
+                // s<x == false
+                if t == BitVector(0) {
+                    BitVector(rng.sample(x.0.0..=x.1.0))
+                // s<x == true
+                } else {
+                    if x.0 == BitVector(0) {
+                        BitVector(rng.sample(1..=x.1.0))
+                    } else {
+                        BitVector(rng.sample(x.0.0..=x.1.0))
+                    }
+                }
+            }
+        }
         _ => unimplemented!(),
     }
 }
@@ -404,6 +438,18 @@ fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeInde
             match i.instruction {
                 Instruction::Add(_) | Instruction::Addi(_) => update_binary(f, ab, n, |l, r| l + r),
                 Instruction::Mul(_) => update_binary(f, ab, n, |l, r| l * r),
+                Instruction::Sltu(_) => update_binary(
+                    f,
+                    ab,
+                    n,
+                    |l, r| {
+                        if l < r {
+                            BitVector(1)
+                        } else {
+                            BitVector(0)
+                        }
+                    },
+                ),
                 _ => unimplemented!(),
             }
             f.neighbors_directed(n, Direction::Outgoing)
@@ -556,6 +602,7 @@ mod tests {
     fn instr_to_str(i: Instruction) -> &'static str {
         match i {
             Instruction::Mul(_) => "*",
+            Instruction::Sltu(_) => "<",
             _ => unimplemented!(),
         }
     }
