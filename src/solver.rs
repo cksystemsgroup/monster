@@ -16,10 +16,14 @@ fn is_invertable(
     x: TernaryBitVector,
     s: BitVector,
     t: BitVector,
-    _d: ArgumentSide,
+    d: ArgumentSide,
 ) -> bool {
     match instruction {
         Instruction::Add(_) | Instruction::Addi(_) => x.mcb(t - s),
+        Instruction::Sub(_) => match d {
+            ArgumentSide::Lhs => x.mcb(t + s),
+            ArgumentSide::Rhs => x.mcb(s - t),
+        },
         Instruction::Mul(_) => {
             fn y(s: BitVector, t: BitVector) -> BitVector {
                 let c = s.ctz();
@@ -82,7 +86,7 @@ fn is_constraint_invertable(
 
 fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) -> bool {
     match instruction {
-        Instruction::Add(_) | Instruction::Addi(_) => true,
+        Instruction::Add(_) | Instruction::Addi(_) | Instruction::Sub(_) => true,
         Instruction::Mul(_) => {
             fn value_exists(x: TernaryBitVector, t: BitVector) -> bool {
                 let y = x.constant_bits() | (BitVector::ones() & !x.constant_bit_mask());
@@ -199,10 +203,14 @@ fn compute_inverse_value(
     x: TernaryBitVector,
     s: BitVector,
     t: BitVector,
-    _d: ArgumentSide,
+    d: ArgumentSide,
 ) -> BitVector {
     match i {
         Instruction::Add(_) | Instruction::Addi(_) => t - s,
+        Instruction::Sub(_) => match d {
+            ArgumentSide::Lhs => t + s,
+            ArgumentSide::Rhs => s - t,
+        },
         Instruction::Mul(_) => {
             let y = s >> s.ctz();
 
@@ -267,7 +275,9 @@ fn compute_consistent_value(
     _d: ArgumentSide,
 ) -> BitVector {
     match i {
-        Instruction::Add(_) | Instruction::Addi(_) => BitVector(random::<u64>()),
+        Instruction::Add(_) | Instruction::Addi(_) | Instruction::Sub(_) => {
+            BitVector(random::<u64>())
+        }
         Instruction::Mul(_) => BitVector({
             if t == BitVector(0) {
                 0
@@ -437,6 +447,7 @@ fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeInde
         Node::Instruction(i) => {
             match i.instruction {
                 Instruction::Add(_) | Instruction::Addi(_) => update_binary(f, ab, n, |l, r| l + r),
+                Instruction::Sub(_) => update_binary(f, ab, n, |l, r| l - r),
                 Instruction::Mul(_) => update_binary(f, ab, n, |l, r| l * r),
                 Instruction::Sltu(_) => update_binary(
                     f,
@@ -746,6 +757,7 @@ mod tests {
     }
 
     // TODO: add tests for ADD
+    // TODO: add tests for SUB
 
     const MUL: Instruction = Instruction::Mul(RType(0));
 
