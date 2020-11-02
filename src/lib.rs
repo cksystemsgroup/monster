@@ -1,14 +1,11 @@
 pub mod bitvec;
 pub mod boolector;
-pub mod candidate_path;
 pub mod cfg;
-pub mod dead_code_elimination;
 pub mod decode;
 pub mod disassemble;
 pub mod elf;
 pub mod engine;
 pub mod exploration_strategy;
-pub mod formula_graph;
-pub mod iterator;
 pub mod solver;
+pub mod symbolic_state;
 pub mod ternary;
