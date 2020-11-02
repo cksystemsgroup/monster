@@ -73,7 +73,7 @@ fn is_invertable(
         BVOperator::Sltu => {
             // (x<s) = t
             if _d == ArgumentSide::Lhs {
-                if t == BitVector::ones() {
+                if t == BitVector(1) {
                     if s == BitVector(0) {
                         return false
                     }
@@ -88,7 +88,7 @@ fn is_invertable(
                 return true
             // (s<x) = t
             } else {
-                if t == BitVector::ones() {
+                if t == BitVector(1) {
                     if s == BitVector::ones() {
                         return false
                     }
@@ -132,16 +132,16 @@ fn is_consistent(op: BVOperator, x: TernaryBitVector, t: BitVector) -> bool {
                 && implies(t.odd(), || x.hi().lsb() != 0)
                 && implies(!t.odd(), || value_exists(x, t))
         }
-        BVOperator::Sltu(_) => {
+        BVOperator::Sltu => {
             if _d == ArgumentSide::Lhs {
-                if t == BitVector::ones() {
+                if t == BitVector(1) {
                     if x.lo == BitVector::ones() {
                         return false
                     }
                 }
                 return true
             } else {
-                if t == BitVector::ones() {
+                if t == BitVector(1) {
                     if x.hi == BitVector(0) {
                         return false
                     }
