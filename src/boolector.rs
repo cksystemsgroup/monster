@@ -41,6 +41,7 @@ fn traverse<'a>(graph: &Formula, node: NodeIndex, solver: &'a Rc<Btor>) -> BV<Rc
                 Inst::Add(_) | Inst::Addi(_) => lhs.add(&rhs),
                 Inst::Sub(_) => lhs.sub(&rhs),
                 Inst::Mul(_) => lhs.mul(&rhs),
+                Inst::Sltu(_) => lhs.slt(&rhs),
                 i => unimplemented!("instruction: {:?}", i),
             }
         }
