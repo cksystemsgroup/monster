@@ -59,18 +59,30 @@ pub struct ElfMetadata {
     pub code_length: u64,
 }
 
-pub fn load_file(
-    object_file: &Path,
-    memory_limit: usize,
-) -> Option<(Vec<u8>, Vec<u8>, ElfMetadata)> {
-    match fs::read(object_file) {
-        Ok(buffer) => unsafe { load(buffer.as_slice(), memory_limit) },
-        _ => None,
-    }
+#[derive(Clone, Debug)]
+pub struct Program {
+    pub code_segment: Vec<u8>,
+    pub data_segment: Vec<u8>,
+    pub entry_address: u64,
+}
+
+pub fn load_file<P>(object_file: P, memory_limit: usize) -> Option<Program>
+where
+    P: AsRef<Path>,
+{
+    time_info!(
+        format!("loading file {}", object_file.as_ref().to_str().unwrap()).as_str(),
+        {
+            match fs::read(object_file.as_ref()) {
+                Ok(buffer) => unsafe { load(buffer.as_slice(), memory_limit) },
+                _ => None,
+            }
+        }
+    )
 }
 
 #[allow(clippy::missing_safety_doc)]
-pub unsafe fn load(image: &[u8], memory_limit: usize) -> Option<(Vec<u8>, Vec<u8>, ElfMetadata)> {
+pub unsafe fn load(image: &[u8], memory_limit: usize) -> Option<Program> {
     let header: Header = match image.read_raw() {
         Some(x) => x,
         None => return None,
@@ -118,7 +130,6 @@ pub unsafe fn load(image: &[u8], memory_limit: usize) -> Option<(Vec<u8>, Vec<u8
 
         memory = Vec::from(slice);
 
-        println!("{:?}", ph);
         // memory[0..ph.p_filesz as usize].clone_from_slice(
         //     ,
         // );
@@ -130,33 +141,25 @@ pub unsafe fn load(image: &[u8], memory_limit: usize) -> Option<(Vec<u8>, Vec<u8
         None => 0_u64,
     };
 
-    println!("memory.len(): {}", memory.len());
-    println!("code_length: {}", code_length);
-
     let data_segment = memory.split_off(code_length as usize);
 
-    println!("code_segment.len(): {}", memory.len());
-    println!("data_segment.len(): {}", data_segment.len());
-
-    Some((
-        memory,
+    Some(Program {
+        code_segment: memory,
         data_segment,
-        ElfMetadata {
-            entry_address: header.e_entry,
-            code_length,
-        },
-    ))
+        entry_address: header.e_entry,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn can_load_elf_binary() {
         let test_file = Path::new("division-by-zero-3-35.o");
 
-        let _res = load_file(test_file, 10);
+        let _res = load_file(test_file.to_path_buf(), 10);
 
         // file is not generated in CI pipeline yet
         // assert!(res.is_some(), "can load ELF file");

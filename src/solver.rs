@@ -1,26 +1,70 @@
-#![allow(dead_code)]
 #![allow(clippy::many_single_char_names)]
 
 use crate::bitvec::*;
-use crate::formula_graph::{ArgumentSide, BooleanFunction, Formula, Node, NodeIndex};
+use crate::symbolic_state::{BVOperator, Formula, Node, OperandSide, SymbolId as NodeIndex};
 use crate::ternary::*;
+use log::{debug, log_enabled, trace, Level};
 use petgraph::{visit::EdgeRef, Direction};
 use rand::{random, Rng};
-use riscv_decode::Instruction;
+use crate::symbolic_state::Node::Operator;
 
 pub type Assignment<T> = Vec<T>;
 
+pub trait Solver {
+    fn solve(&mut self, formula: &Formula, root: NodeIndex) -> Option<Assignment<BitVector>>;
+}
+
+pub struct NativeSolver {}
+
+impl Default for NativeSolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NativeSolver {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Solver for NativeSolver {
+    fn solve(&mut self, formula: &Formula, root: NodeIndex) -> Option<Assignment<BitVector>> {
+        debug!("try to solve with native solver");
+
+        time_debug!("finished solving formula", { solve(formula, root) })
+    }
+}
+
+pub fn solve(formula: &Formula, root: NodeIndex) -> Option<Assignment<BitVector>> {
+    let ab = initialize_ab(formula);
+    let at = compute_at(formula);
+
+    let result = sat(formula, root, at, ab);
+
+    Some(result)
+}
+
+// short-circuiting implies
+fn implies<F: FnOnce() -> bool>(lhs: bool, rhs: F) -> bool {
+    !lhs || rhs()
+}
+
 // check if invertability condition is met
 fn is_invertable(
-    instruction: Instruction,
+    op: BVOperator,
     x: TernaryBitVector,
     s: BitVector,
     t: BitVector,
-    _d: ArgumentSide,
+    d: OperandSide,
 ) -> bool {
-    match instruction {
-        Instruction::Add(_) | Instruction::Addi(_) => x.mcb(t - s),
-        Instruction::Mul(_) => {
+    match op {
+        BVOperator::Add => x.mcb(t - s),
+        BVOperator::Sub => match d {
+            OperandSide::Lhs => x.mcb(t + s),
+            OperandSide::Rhs => x.mcb(s - t),
+        },
+        BVOperator::Mul => {
             fn y(s: BitVector, t: BitVector) -> BitVector {
                 let c = s.ctz();
                 (t >> c) * (s >> c).modinverse().unwrap()
@@ -29,45 +73,49 @@ fn is_invertable(
             ((-s | s) & t == t)
                 && (s == BitVector(0) || (!s.odd() || x.mcb(t * s.modinverse().unwrap())))
                 && (s.odd() || (x << s.ctz()).mcb(y(s, t) << s.ctz()))
-        }
-        Instruction::Divu(_i) => {
-            unimplemented!()
-        }
-        _ => unimplemented!(),
+        },
+        BVOperator::Divu => {
+            if d == OperandSide::Lhs {
+                (s * t) / s == t
+            } else {
+                s / (s / t) == t
+            }
+        },
+        BVOperator::Not => x.mcb(!t),
+        BVOperator::BitwiseAnd => {
+            let c = !(x.lo() ^ x.hi());
+
+            (t & s == t) && ((s & x.hi() & c) == (t & c))
+        },
+        BVOperator::Equals => {
+            implies(t != BitVector(0), || x.mcb(s))
+                && implies(t == BitVector(0), || (x.hi() != x.lo()) || (x.hi() != s))
+        },
+        _ => unimplemented!("can not check invertability for operator: {:?}", op),
     }
 }
 
-fn is_constraint_invertable(
-    bf: BooleanFunction,
-    _x: TernaryBitVector,
-    _s: BitVector,
-    _t: BitVector,
-    _d: ArgumentSide,
-) -> bool {
-    match bf {
-        BooleanFunction::Equals => true,
-        _ => unimplemented!(),
-    }
-}
-
-fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) -> bool {
-    match instruction {
-        Instruction::Add(_) | Instruction::Addi(_) => true,
-        Instruction::Mul(_) => {
+fn is_consistent(op: BVOperator, x: TernaryBitVector, t: BitVector) -> bool {
+    match op {
+        BVOperator::Add | BVOperator::Sub | BVOperator::Equals => true,
+        BVOperator::Not => x.mcb(!t),
+        BVOperator::BitwiseAnd => t & x.hi() == t,
+        BVOperator::Mul => {
             fn value_exists(x: TernaryBitVector, t: BitVector) -> bool {
                 let y = x.constant_bits() | (BitVector::ones() & !x.constant_bit_mask());
 
                 x.mcb(y) && t.ctz() >= y.ctz()
             }
 
-            (!(t != BitVector(0)) || (x.1 != BitVector(0)))
-                && (!t.odd() || (x.1.lsb() != 0))
-                && (t.odd() || value_exists(x, t))
+            implies(t != BitVector(0), || x.hi() != BitVector(0))
+                && implies(t.odd(), || x.hi().lsb() != 0)
+                && implies(!t.odd(), || value_exists(x, t))
         },
-        Instruction::Divu(_i) => {
-            unimplemented!()
-        }
-        _ => unimplemented!(),
+        BVOperator::Divu => {
+            // This is only the case when NOT considering constant bits (see page 5: "Consistency Conditions." in the ternany pop-local-search paper)
+            true
+        },
+        _ => unimplemented!("can not check consistency for operator: {:?}", op),
     }
 }
 
@@ -86,7 +134,7 @@ fn is_leaf(formula: &Formula, idx: NodeIndex) -> bool {
 fn compute_at(formula: &Formula) -> Assignment<TernaryBitVector> {
     formula
         .node_indices()
-        .map(|_| TernaryBitVector(BitVector(0), BitVector::ones()))
+        .map(|_| TernaryBitVector::new(0, u64::max_value()))
         .collect::<Assignment<TernaryBitVector>>()
 }
 
@@ -97,10 +145,19 @@ fn initialize_ab(formula: &Formula) -> Assignment<BitVector> {
     let mut ab = formula
         .node_indices()
         .map(|i| match formula[i] {
-            Node::Constant(c) => BitVector(c.value),
+            Node::Constant(c) => BitVector(c),
             _ => BitVector(random::<u64>()),
         })
         .collect::<Assignment<BitVector>>();
+
+    if log_enabled!(Level::Trace) {
+        formula
+            .node_indices()
+            .filter(|i| matches!(formula[*i], Node::Input(_)))
+            .for_each(|i| {
+                trace!("initialize: x{} <- {:#x}", i.index(), ab[i.index()].0);
+            });
+    }
 
     // Propagate all values down when all input/const nodes are initialized
     formula.node_indices().for_each(|i| match formula[i] {
@@ -124,42 +181,43 @@ fn select(
     t: BitVector,
     at: &[TernaryBitVector],
     ab: &[BitVector],
-) -> (NodeIndex, NodeIndex, ArgumentSide) {
+) -> (NodeIndex, NodeIndex, OperandSide) {
     let (lhs, rhs) = parents(f, idx);
 
     fn is_constant(f: &Formula, n: NodeIndex) -> bool {
-        match f[n] {
-            Node::Constant(_) => true,
-            _ => false,
-        }
+        matches!(f[n], Node::Constant(_))
     }
 
     #[allow(clippy::if_same_then_else)]
     if is_constant(f, lhs) {
-        (rhs, lhs, ArgumentSide::Rhs)
+        (rhs, lhs, OperandSide::Rhs)
     } else if is_constant(f, rhs) {
-        (lhs, rhs, ArgumentSide::Lhs)
-    } else if is_essential(f, lhs, ArgumentSide::Lhs, rhs, t, at, ab) {
-        (lhs, rhs, ArgumentSide::Lhs)
-    } else if is_essential(f, rhs, ArgumentSide::Rhs, lhs, t, at, ab) {
-        (rhs, lhs, ArgumentSide::Rhs)
+        (lhs, rhs, OperandSide::Lhs)
+    } else if is_essential(f, lhs, OperandSide::Lhs, rhs, t, at, ab) {
+        (lhs, rhs, OperandSide::Lhs)
+    } else if is_essential(f, rhs, OperandSide::Rhs, lhs, t, at, ab) {
+        (rhs, lhs, OperandSide::Rhs)
     } else if random() {
-        (rhs, lhs, ArgumentSide::Rhs)
+        (rhs, lhs, OperandSide::Rhs)
     } else {
-        (lhs, rhs, ArgumentSide::Lhs)
+        (lhs, rhs, OperandSide::Lhs)
     }
 }
 
 fn compute_inverse_value(
-    i: Instruction,
+    op: BVOperator,
     x: TernaryBitVector,
     s: BitVector,
     t: BitVector,
-    _d: ArgumentSide,
+    d: OperandSide,
 ) -> BitVector {
-    match i {
-        Instruction::Add(_) | Instruction::Addi(_) => t - s,
-        Instruction::Mul(_) => {
+    match op {
+        BVOperator::Add => t - s,
+        BVOperator::Sub => match d {
+            OperandSide::Lhs => t + s,
+            OperandSide::Rhs => s - t,
+        },
+        BVOperator::Mul => {
             let y = s >> s.ctz();
 
             let y_inv = y.modinverse().unwrap();
@@ -179,28 +237,46 @@ fn compute_inverse_value(
             let result_with_arbitrary = result | arbitrary_bits;
 
             (result_with_arbitrary & !x.constant_bit_mask()) | x.constant_bits()
+        },
+        BVOperator::Divu => {
+            match d {
+                OperandSide::Lhs => t * s,
+                OperandSide::Rhs => s / t
+            }
+        },
+        BVOperator::BitwiseAnd => {
+            let fixed_bit_mask = x.constant_bit_mask() | s;
+            let fixed_bits = x.constant_bits() | (s & t);
+
+            (BitVector(random::<u64>()) & !fixed_bit_mask) | fixed_bits
+        },
+        BVOperator::Equals => {
+            if t == BitVector(0) {
+                loop {
+                    let r = BitVector(random::<u64>());
+                    if r != s {
+                        break r;
+                    }
+                }
+            } else {
+                s
+            }
         }
-        _ => unimplemented!(),
+        _ => unimplemented!("compute inverse value for binary operator: {:?}", op),
     }
 }
 
-fn random_from(r: std::ops::Range<u64>) -> u64 {
-    let lowest = r.start as f64;
-    let highest = (r.end - r.start) as f64;
-
-    (lowest + random::<f64>() * highest) as u64
-}
-
 fn compute_consistent_value(
-    i: Instruction,
-    _x: TernaryBitVector,
-    _s: BitVector,
+    op: BVOperator,
+    x: TernaryBitVector,
     t: BitVector,
-    _d: ArgumentSide,
+    d: OperandSide,
 ) -> BitVector {
-    match i {
-        Instruction::Add(_) | Instruction::Addi(_) => BitVector(random::<u64>()),
-        Instruction::Mul(_) => BitVector({
+    match op {
+        BVOperator::Add | BVOperator::Sub | BVOperator::Equals => {
+            (BitVector(random::<u64>()) & !x.constant_bit_mask()) | x.constant_bits()
+        }
+        BVOperator::Mul => BitVector({
             if t == BitVector(0) {
                 0
             } else {
@@ -218,20 +294,46 @@ fn compute_consistent_value(
                 r as u64
             }
         }),
-        _ => unimplemented!(),
+        BVOperator::Divu => {
+            let v = BitVector(random::<u64>());
+            match d {
+                OperandSide::Lhs => {
+                    t * v
+                }
+                OperandSide::Rhs => {
+                    v / t
+                }
+            }
+        },
+        BVOperator::BitwiseAnd => {
+            (BitVector(random::<u64>()) & !x.constant_bit_mask()) | x.constant_bits() | t
+        }
+        _ => unimplemented!("compute consitent value for binary operator: {:?}", op),
     }
 }
 
-fn compute_inverse_constraint_value(
-    bf: BooleanFunction,
+// Every invertability condition is also a consistency condition for unary operators
+fn is_invertable_for_unary_op(op: BVOperator, x: TernaryBitVector, t: BitVector) -> bool {
+    match op {
+        BVOperator::Not => x.mcb(!t),
+        _ => unimplemented!("compute inverse value for unary operator: {:?}", op),
+    }
+}
+
+fn compute_inverse_value_for_unary_op(
+    op: BVOperator,
     _x: TernaryBitVector,
-    s: BitVector,
-    _t: BitVector,
-    _d: ArgumentSide,
+    t: BitVector,
 ) -> BitVector {
-    match bf {
-        BooleanFunction::Equals => s,
-        _ => unimplemented!(),
+    match op {
+        BVOperator::Not => {
+            if t == BitVector(0) {
+                BitVector(1)
+            } else {
+                BitVector(0)
+            }
+        }
+        _ => unimplemented!("compute consistent value for unary operator: {:?}", op),
     }
 }
 
@@ -244,7 +346,7 @@ fn value(
     n: NodeIndex,
     nx: NodeIndex,
     ns: NodeIndex,
-    side: ArgumentSide,
+    side: OperandSide,
     t: BitVector,
     at: &[TernaryBitVector],
     ab: &[BitVector],
@@ -253,11 +355,11 @@ fn value(
     let s = ab[ns.index()];
 
     match &f[n] {
-        Node::Instruction(i) => {
-            let consistent = compute_consistent_value(i.instruction, x, s, t, side);
+        Node::Operator(op) => {
+            let consistent = compute_consistent_value(*op, x, t, side);
 
-            if is_invertable(i.instruction, x, s, t, side) {
-                let inverse = compute_inverse_value(i.instruction, x, s, t, side);
+            if is_invertable(*op, x, s, t, side) {
+                let inverse = compute_inverse_value(*op, x, s, t, side);
                 let choose_inverse =
                     rand::thread_rng().gen_range(0.0_f64, 1.0_f64) < CHOOSE_INVERSE;
 
@@ -270,16 +372,6 @@ fn value(
                 consistent
             }
         }
-        Node::Constraint(c) => {
-            if is_constraint_invertable(c.op, x, s, t, side) {
-                compute_inverse_constraint_value(c.op, x, s, t, side)
-            // TODO: Compute consistent value and choose between inverse and consistent
-            // non-deterministiclly
-            //let consistent = compute_consistent_value()
-            } else {
-                unimplemented!()
-            }
-        }
         _ => unimplemented!(),
     }
 }
@@ -287,7 +379,7 @@ fn value(
 fn is_essential(
     formula: &Formula,
     this: NodeIndex,
-    on_side: ArgumentSide,
+    on_side: OperandSide,
     other: NodeIndex,
     t: BitVector,
     at: &[TernaryBitVector],
@@ -297,23 +389,29 @@ fn is_essential(
     let ab_nx = ab[this.index()];
 
     match &formula[other] {
-        Node::Instruction(i) => !is_invertable(i.instruction, at_ns, ab_nx, t, on_side.other()),
-        Node::Constraint(c) => !is_constraint_invertable(c.op, at_ns, ab_nx, t, on_side.other()),
+        Node::Operator(op) => !is_invertable(*op, at_ns, ab_nx, t, on_side.other()),
         // TODO: not mentioned in paper => improvised. is that really true?
         Node::Constant(_) | Node::Input(_) => false,
     }
 }
 
-pub fn parents(f: &Formula, n: NodeIndex) -> (NodeIndex, NodeIndex) {
-    fn target_by_side(f: &Formula, n: NodeIndex, side: ArgumentSide) -> NodeIndex {
+fn parent(f: &Formula, n: NodeIndex) -> NodeIndex {
+    f.edges_directed(n, Direction::Incoming)
+        .next()
+        .unwrap()
+        .source()
+}
+
+fn parents(f: &Formula, n: NodeIndex) -> (NodeIndex, NodeIndex) {
+    fn target_by_side(f: &Formula, n: NodeIndex, side: OperandSide) -> NodeIndex {
         f.edges_directed(n, Direction::Incoming)
             .find(|e| *e.weight() == side)
             .unwrap()
             .source()
     }
 
-    let lhs = target_by_side(f, n, ArgumentSide::Lhs);
-    let rhs = target_by_side(f, n, ArgumentSide::Rhs);
+    let lhs = target_by_side(f, n, OperandSide::Lhs);
+    let rhs = target_by_side(f, n, OperandSide::Rhs);
 
     (lhs, rhs)
 }
@@ -321,12 +419,14 @@ pub fn parents(f: &Formula, n: NodeIndex) -> (NodeIndex, NodeIndex) {
 fn update_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeIndex, v: BitVector) {
     ab[n.index()] = v;
 
+    trace!("update: x{} <- {:#x}", n.index(), v.0);
+
     f.neighbors_directed(n, Direction::Outgoing)
         .for_each(|n| propagate_assignment(f, ab, n));
 }
 
 fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeIndex) {
-    fn update_binary<Op>(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeIndex, op: Op)
+    fn update_binary<Op>(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeIndex, s: &str, op: Op)
     where
         Op: FnOnce(BitVector, BitVector) -> BitVector,
     {
@@ -334,36 +434,68 @@ fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeInde
 
         let result = op(ab[lhs.index()], ab[rhs.index()]);
 
+        trace!(
+            "propagate: x{} := x{}({:#x}) {} x{}({:#x}) |- x{} <- {:#x}",
+            n.index(),
+            lhs.index(),
+            ab[lhs.index()].0,
+            s,
+            rhs.index(),
+            ab[rhs.index()].0,
+            n.index(),
+            result.0
+        );
+
+        ab[n.index()] = result;
+    }
+
+    fn update_unary<Op>(f: &Formula, ab: &mut Assignment<BitVector>, n: NodeIndex, s: &str, op: Op)
+    where
+        Op: FnOnce(BitVector) -> BitVector,
+    {
+        let p = parent(f, n);
+
+        let result = op(ab[p.index()]);
+
+        trace!(
+            "propagate: x{} := {}x{}({:#x}) |- x{} <- {:#x}",
+            n.index(),
+            s,
+            p.index(),
+            ab[p.index()].0,
+            n.index(),
+            result.0
+        );
+
         ab[n.index()] = result;
     }
 
     match &f[n] {
-        Node::Instruction(i) => {
-            match i.instruction {
-                Instruction::Add(_) | Instruction::Addi(_) => update_binary(f, ab, n, |l, r| l + r),
-                Instruction::Mul(_) => update_binary(f, ab, n, |l, r| l * r),
-                _ => unimplemented!(),
+        Node::Operator(op) => {
+            match op {
+                BVOperator::Add => update_binary(f, ab, n, "+", |l, r| l + r),
+                BVOperator::Sub => update_binary(f, ab, n, "-", |l, r| l - r),
+                BVOperator::Mul => update_binary(f, ab, n, "*", |l, r| l * r),
+                BVOperator::BitwiseAnd => update_binary(f, ab, n, "&", |l, r| l & r),
+                BVOperator::Equals => update_binary(f, ab, n, "=", |l, r| {
+                    if l == r {
+                        BitVector(1)
+                    } else {
+                        BitVector(0)
+                    }
+                }),
+                BVOperator::Not => update_unary(f, ab, n, "!", |x| {
+                    if x == BitVector(0) {
+                        BitVector(1)
+                    } else {
+                        BitVector(0)
+                    }
+                }),
+                _ => unimplemented!("propagation of operator: {:?}", op),
             }
             f.neighbors_directed(n, Direction::Outgoing)
                 .for_each(|n| propagate_assignment(f, ab, n));
         }
-        Node::Constraint(c) => match c.op {
-            BooleanFunction::Equals => {
-                update_binary(
-                    f,
-                    ab,
-                    n,
-                    |l, r| {
-                        if l == r {
-                            BitVector(1)
-                        } else {
-                            BitVector(0)
-                        }
-                    },
-                )
-            }
-            bf => unimplemented!("not implemented: {:?}", bf),
-        },
         _ => unreachable!(),
     }
 }
@@ -375,25 +507,86 @@ fn sat(
     at: Assignment<TernaryBitVector>,
     mut ab: Assignment<BitVector>,
 ) -> Assignment<BitVector> {
+    let mut iterations = 0;
+
     while ab[root.index()] != BitVector(1) {
         let mut n = root;
         let mut t = BitVector(1);
 
-        while !is_leaf(formula, n) {
-            let (nx, ns, side) = select(formula, n, t, &at, &ab);
+        iterations += 1;
+        trace!("search {}: x{} <- 0x1", iterations, root.index());
 
-            match formula[n] {
-                Node::Instruction(instr) => {
-                    let x = at[nx.index()];
-                    if !is_consistent(instr.instruction, x, t) {
-                        break;
+        while !is_leaf(formula, n) {
+            let (v, nx) = match formula[n] {
+                Node::Operator(op) => {
+                    if op.is_unary() {
+                        let nx = parent(formula, n);
+
+                        let x = at[nx.index()];
+
+                        if !is_invertable_for_unary_op(op, x, t) {
+                            break;
+                        }
+
+                        let v = compute_inverse_value_for_unary_op(op, x, t);
+
+                        trace!(
+                            "search {}: x{}({:#x}) = {}x{}({:#x}) |- x{} <- {:#x}",
+                            iterations,
+                            n.index(),
+                            t.0,
+                            op,
+                            nx.index(),
+                            ab[nx.index()].0,
+                            nx.index(),
+                            v.0
+                        );
+
+                        (v, nx)
+                    } else {
+                        let (nx, ns, side) = select(formula, n, t, &at, &ab);
+
+                        let x = at[nx.index()];
+
+                        if !is_consistent(op, x, t) {
+                            trace!(
+                                "not consistent: op={:?} x={:?} t={:?} -> aborting",
+                                op,
+                                x,
+                                t
+                            );
+                            break;
+                        }
+
+                        let v = value(formula, n, nx, ns, side, t, &at, &ab);
+
+                        if log_enabled!(Level::Trace) {
+                            let (lhs, rhs) = if side == OperandSide::Lhs {
+                                (nx, ns)
+                            } else {
+                                (ns, nx)
+                            };
+
+                            trace!(
+                                "search {}: x{}({:#x}) := x{}({:#x}) {} x{}({:#x}) |- x{} <- {:#x}",
+                                iterations,
+                                n.index(),
+                                t.0,
+                                lhs.index(),
+                                ab[lhs.index()].0,
+                                op,
+                                rhs.index(),
+                                ab[rhs.index()].0,
+                                nx.index(),
+                                v.0
+                            );
+                        }
+
+                        (v, nx)
                     }
                 }
-                Node::Constraint(_) => {}
                 _ => panic!("non instruction node found"),
             };
-
-            let v = value(formula, n, nx, ns, side, t, &at, &ab);
 
             t = v;
             n = nx;
@@ -407,25 +600,15 @@ fn sat(
     ab
 }
 
-pub fn solve(formula: &Formula, root: NodeIndex) -> Option<Assignment<BitVector>> {
-    let ab = initialize_ab(formula);
-    let at = compute_at(formula);
-
-    let result = sat(formula, root, at, ab);
-
-    Some(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formula_graph::{Const, Constraint, Input, Instr};
-    use riscv_decode::types::*;
+    use crate::symbolic_state::Node::Operator;
 
     fn create_formula_with_input() -> (Formula, NodeIndex) {
         let mut formula = Formula::new();
 
-        let input = Node::Input(Input::new("x0".to_string()));
+        let input = Node::Input(String::from("x0"));
         let input_idx = formula.add_node(input);
 
         (formula, input_idx)
@@ -434,14 +617,13 @@ mod tests {
     fn add_equals_constrain(
         formula: &mut Formula,
         to: NodeIndex,
-        on: ArgumentSide,
+        on: OperandSide,
         constant: u64,
     ) -> NodeIndex {
-        let constrain =
-            Node::Constraint(Constraint::new("exit".to_string(), BooleanFunction::Equals));
+        let constrain = Node::Operator(BVOperator::Equals);
         let constrain_idx = formula.add_node(constrain);
 
-        let constrain_c = Node::Constant(Const::new(constant));
+        let constrain_c = Node::Constant(constant);
         let constrain_c_idx = formula.add_node(constrain_c);
 
         formula.add_edge(to, constrain_idx, on);
@@ -454,7 +636,7 @@ mod tests {
     fn solve_trivial_equals_constrain() {
         let (mut formula, input_idx) = create_formula_with_input();
 
-        let root = add_equals_constrain(&mut formula, input_idx, ArgumentSide::Lhs, 10);
+        let root = add_equals_constrain(&mut formula, input_idx, OperandSide::Lhs, 10);
 
         let result = solve(&formula, root);
 
@@ -470,16 +652,16 @@ mod tests {
     fn solve_bvadd() {
         let (mut formula, input_idx) = create_formula_with_input();
 
-        let constant = Node::Constant(Const::new(3));
+        let constant = Node::Constant(3);
         let constant_idx = formula.add_node(constant);
 
-        let instr = Node::Instruction(Instr::new(Instruction::Add(RType(0)))); // registers do not mather
+        let instr = Node::Operator(BVOperator::Add);
         let instr_idx = formula.add_node(instr);
 
-        formula.add_edge(input_idx, instr_idx, ArgumentSide::Lhs);
-        formula.add_edge(constant_idx, instr_idx, ArgumentSide::Rhs);
+        formula.add_edge(input_idx, instr_idx, OperandSide::Lhs);
+        formula.add_edge(constant_idx, instr_idx, OperandSide::Rhs);
 
-        let root = add_equals_constrain(&mut formula, instr_idx, ArgumentSide::Lhs, 10);
+        let root = add_equals_constrain(&mut formula, instr_idx, OperandSide::Lhs, 10);
 
         let result = solve(&formula, root);
 
@@ -491,20 +673,12 @@ mod tests {
         );
     }
 
-    fn instr_to_str(i: Instruction) -> &'static str {
-        match i {
-            Instruction::Mul(_) => "*",
-            Instruction::Divu(_) => "/",
-            _ => unimplemented!(),
-        }
-    }
-
     fn test_invertability(
-        op: Instruction,
+        op: BVOperator,
         x: &'static str,
         s: u64,
         t: u64,
-        side: ArgumentSide,
+        d: OperandSide,
         result: bool,
         msg: &'static str,
     ) {
@@ -512,33 +686,28 @@ mod tests {
         let s = BitVector(s);
         let t = BitVector(t);
 
-        if side == ArgumentSide::Lhs {
-            assert_eq!(is_invertable(op, x, s, t, side), result, "{:?} {} {:?} == {:?}   {}", x, instr_to_str(op), s, t, msg);
-        } else {
-            assert_eq!(is_invertable(op, x, s, t, side), result, "{:?} {} {:?} == {:?}   {}", s, instr_to_str(op), x, t, msg);
+        match d {
+            OperandSide::Lhs => {
+                assert_eq!(is_invertable(op, x, s, t, d), result, "{:?} {:?} {:?} == {:?}   {}", x, op, s, t, msg);
+            }
+            OperandSide::Rhs => {
+                assert_eq!(is_invertable(op, x, s, t, d), result, "{:?} {:?} {:?} == {:?}   {}", s, op, x, t, msg);
+            }
         }
     }
 
-    fn test_consistence(
-        op: Instruction,
-        x: &'static str,
-        s: u64,
-        t: u64,
-        result: bool,
-        msg: &'static str,
-    ) {
+    fn test_consistence(op: BVOperator, x: &'static str, t: u64, result: bool, msg: &'static str) {
         let x = TernaryBitVector::lit(x);
-        let s = BitVector(s);
         let t = BitVector(t);
-        assert_eq!(is_consistent(op, x, t), result, "{:?} {} {:?} == {:?}   {}", x, instr_to_str(op), s, t, msg);
+        assert_eq!(is_consistent(op, x, t), result, "{:?} {:?} s == {:?}   {}", x, op, t, msg);
     }
 
     fn test_inverse_value_computation<F>(
-        op: Instruction,
+        op: BVOperator,
         x: &'static str,
         s: u64,
         t: u64,
-        d: ArgumentSide,
+        d: OperandSide,
         f: F,
     ) where
         F: FnOnce(BitVector, BitVector) -> BitVector,
@@ -550,88 +719,115 @@ mod tests {
         let computed = compute_inverse_value(op, x, s, t, d);
 
         // prove: computed <> s == t        where <> is the binary operator
-        assert_eq!(
-            f(computed, s),
-            t,
-            "{:?} {} {:?} == {:?}",
-            computed,
-            instr_to_str(op),
-            s,
-            t
-        );
+
+        match d {
+            OperandSide::Lhs => {
+                assert_eq!(
+                    f(computed, s),
+                    t,
+                    "{:?} {:?} {:?} == {:?}",
+                    computed,
+                    op,
+                    s,
+                    t
+                );
+            }
+            OperandSide::Rhs => {
+                assert_eq!(
+                    f(s, computed),
+                    t,
+                    "{:?} {:?} {:?} == {:?}",
+                    s,
+                    op,
+                    computed,
+                    t
+                );
+            }
+        }
+
     }
 
     fn test_consistent_value_computation<F>(
-        op: Instruction,
+        op: BVOperator,
         x: &'static str,
-        s: u64,
         t: u64,
-        d: ArgumentSide,
+        d: OperandSide,
         f: F,
     ) where
         F: FnOnce(BitVector, BitVector) -> BitVector,
     {
         let x = TernaryBitVector::lit(x);
-        let s = BitVector(s);
         let t = BitVector(t);
 
-        let computed = compute_consistent_value(op, x, s, t, d);
+        let computed = compute_consistent_value(op, x, t, d);
 
         // TODO: How to test consistent values?
         // To proof that there exists a y, we would have to compute and inverse value, which is not
         // always possible.
         // I think, Alastairs
         // prove: Ey.(computed <> y == t)        where <> is the binary bit vector operator
+        //
 
-        let y = match op {
-            Instruction::Add(_) => Some(t - computed),
-            _ => None,
+        let inverse = match op {
+            BVOperator::Add => t - computed,
+            BVOperator::Mul => {
+                let x = TernaryBitVector::new(0, u64::max_value());
+
+                assert!(
+                    is_invertable(op, x, computed, t, d.other()),
+                    "choose values which are invertable..."
+                );
+
+                compute_inverse_value(op, x, computed, t, d.other())
+            },
+            BVOperator::Divu => {
+                compute_inverse_value(op, x, computed, t, d.other())
+            }
+            _ => unimplemented!(),
         };
 
-        if let Some(inverse) = y {
-            if d == ArgumentSide::Lhs {
-                assert_eq!(
-                    f(computed, inverse),
-                    t,
-                    "{:?} {} {:?} == {:?}",
-                    computed,
-                    instr_to_str(op),
-                    inverse,
-                    t
-                );
-            } else {
-                assert_eq!(
-                    f(inverse, computed),
-                    t,
-                    "{:?} {} {:?} == {:?}",
-                    inverse,
-                    instr_to_str(op),
-                    computed,
-                    t
-                );
-            }
+        if d == OperandSide::Lhs {
+            assert_eq!(
+                f(computed, inverse),
+                t,
+                "{:?} {:?} {:?} == {:?}",
+                computed,
+                op,
+                inverse,
+                t
+            );
+        } else {
+            assert_eq!(
+                f(inverse, computed),
+                t,
+                "{:?} {:?} {:?} == {:?}",
+                inverse,
+                op,
+                computed,
+                t
+            );
         }
     }
 
     // TODO: add tests for ADD
+    // TODO: add tests for SUB
 
-    const MUL: Instruction = Instruction::Mul(RType(0));
-    const DIVU: Instruction = Instruction::Divu(RType(0));
+    const MUL: BVOperator = BVOperator::Mul;
+    const DIVU: BVOperator = BVOperator::Divu;
 
     #[test]
     fn check_invertability_condition_for_divu() {
-        test_invertability(DIVU, "1", 1, 1, ArgumentSide::Rhs, true, "trivial division");
-        test_invertability(DIVU, "110", 1, 1, ArgumentSide::Rhs, true, "trivial division");
+        // x doesnt matter
+        test_invertability(DIVU, "1", 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
+        test_invertability(DIVU, "1", 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
 
-        test_invertability(DIVU, "1", 1, 1, ArgumentSide::Lhs, true, "trivial division");
-        test_invertability(DIVU, "110", 1, 1, ArgumentSide::Lhs, true, "trivial division");
-
-        test_invertability(DIVU, "10", 3, 2, ArgumentSide::Lhs, true, "trivial division");
+        test_invertability(DIVU, "1", 3, 2, OperandSide::Lhs, true, "x / 3 = 2");
+        test_invertability(DIVU, "1", 6, 2, OperandSide::Rhs, true, "6 / x = 2");
     }
 
     #[test]
     fn check_invertability_condition_for_mul() {
-        let side = ArgumentSide::Lhs;
+        let side = OperandSide::Lhs;
 
         test_invertability(MUL, "1", 0b1, 0b1, side, true, "trivial multiplication");
         test_invertability(
@@ -682,8 +878,23 @@ mod tests {
     }
 
     #[test]
+    fn compute_inverse_values_for_divu() {
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l / r
+        }
+
+        // test only for values which are actually invertable
+        test_inverse_value_computation(DIVU, "1", 0b1, 0b1, OperandSide::Lhs, f);
+        test_inverse_value_computation(DIVU, "1", 0b1, 0b1, OperandSide::Rhs, f);
+
+        test_inverse_value_computation(DIVU, "110", 2, 3, OperandSide::Lhs, f);
+        test_inverse_value_computation(DIVU, "11", 6, 2, OperandSide::Rhs, f);
+    }
+
+    #[test]
     fn compute_inverse_values_for_mul() {
-        let side = ArgumentSide::Lhs;
+        let side = OperandSide::Lhs;
 
         fn f(l: BitVector, r: BitVector) -> BitVector {
             l * r
@@ -696,37 +907,54 @@ mod tests {
         test_inverse_value_computation(MUL, "**0", 0b10, 0b1100, side, f);
     }
 
+
+    #[test]
+    fn check_consistency_condition_for_divu() {
+        //always true till constant bits
+    }
+
     #[test]
     fn check_consistency_condition_for_mul() {
         let condition = "t != 0 => x^hi != 0";
 
-        test_consistence(MUL, "1", 0b10, 0b110, true, condition);
-        test_consistence(MUL, "0", 0b10, 0b110, false, condition);
+        test_consistence(MUL, "1", 0b110, true, condition);
+        test_consistence(MUL, "0", 0b110, false, condition);
 
         let condition = "odd(t) => x^hi[lsb] != 0";
 
-        test_consistence(MUL, "*00", 0b1, 0b101, false, condition);
-        test_consistence(MUL, "*01", 0b1, 0b101, true, condition);
-        test_consistence(MUL, "*0*", 0b1, 0b11, true, condition);
+        test_consistence(MUL, "*00", 0b101, false, condition);
+        test_consistence(MUL, "*01", 0b101, true, condition);
+        test_consistence(MUL, "*0*", 0b11, true, condition);
 
         let condition = "Ey.(mcb(x, y) && ctz(t) >= ctz(y))";
 
-        test_consistence(MUL, "*00", 0b1, 0b100, true, condition);
-        test_consistence(MUL, "*00", 0b1, 0b10, false, condition);
+        test_consistence(MUL, "*00", 0b100, true, condition);
+        test_consistence(MUL, "*00", 0b10, false, condition);
+    }
+
+    #[test]
+    fn compute_consistent_values_for_divu() {
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l / r
+        }
+
+        test_consistent_value_computation(DIVU, "110", 3, OperandSide::Lhs, f);
+        test_consistent_value_computation(DIVU, "11", 6, OperandSide::Rhs, f);
     }
 
     #[test]
     fn compute_consistent_values_for_mul() {
-        let side = ArgumentSide::Lhs;
+        let side = OperandSide::Lhs;
 
         fn f(l: BitVector, r: BitVector) -> BitVector {
             l * r
         }
 
         // test only for values which actually have a consistent value
-        test_consistent_value_computation(MUL, "1", 0b10, 0b110, side, f);
-        test_consistent_value_computation(MUL, "*01", 0b1, 0b101, side, f);
-        test_consistent_value_computation(MUL, "*0*", 0b1, 0b11, side, f);
-        test_consistent_value_computation(MUL, "*00", 0b1, 0b100, side, f);
+        test_consistent_value_computation(MUL, "1", 0b110, side, f);
+        test_consistent_value_computation(MUL, "*01", 0b101, side, f);
+        test_consistent_value_computation(MUL, "*0*", 0b11, side, f);
+        test_consistent_value_computation(MUL, "*00", 0b100, side, f);
     }
 }

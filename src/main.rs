@@ -1,26 +1,43 @@
-use std::fmt::Display;
-use std::path::Path;
+use env_logger::{Env, TimestampPrecision};
+use log::error;
+use std::{fmt::Display, path::Path};
 
 mod cli;
 
-use monster::{cfg, disassemble::disassemble_riscu, engine};
+use monster::{
+    cfg::{build_cfg_from_file, write_to_file},
+    disassemble::disassemble_riscu,
+    engine,
+};
+
+fn handle_error<R, E, F>(f: F) -> R
+where
+    E: Display,
+    F: FnOnce() -> Result<R, E>,
+{
+    match f() {
+        Err(e) => {
+            error!("{}", e);
+            std::process::exit(1);
+        }
+        Ok(x) => x,
+    }
+}
 
 fn main() {
     let matches = cli::args().get_matches();
 
-    fn handle_error<R, E, F>(f: F) -> R
-    where
-        E: Display,
-        F: FnOnce() -> Result<R, E>,
-    {
-        match f() {
-            Err(e) => {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-            Ok(x) => x,
-        }
-    }
+    let log_level = matches
+        .value_of("verbose")
+        .expect("log level has to be set in CLI at all times");
+
+    let env = Env::new()
+        .filter_or("MONSTER_LOG", log_level)
+        .write_style_or("MONSTER_LOG_STYLE", "always");
+
+    env_logger::Builder::from_env(env)
+        .format_timestamp(Some(TimestampPrecision::Millis))
+        .init();
 
     match matches.subcommand() {
         Some(("disassemble", disassemble_args)) => handle_error(|| {
@@ -32,19 +49,9 @@ fn main() {
                 let input = Path::new(cfg_args.value_of("input-file").unwrap());
                 let output = Path::new(cfg_args.value_of("output-file").unwrap());
 
-                let (graph, _, _) = cfg::build_from_file(Path::new(input))?;
+                let ((graph, _), _) = build_cfg_from_file(Path::new(input))?;
 
-                if let Some(_format @ "png") = cfg_args.value_of("format") {
-                    let tmp = Path::new(".tmp-cfg.dot");
-
-                    cfg::write_to_file(&graph, tmp).map_err(|e| e.to_string())?;
-
-                    cfg::convert_dot_to_png(tmp, output)?;
-
-                    std::fs::remove_file(tmp).map_err(|e| e.to_string())?;
-                } else {
-                    cfg::write_to_file(&graph, output).map_err(|e| e.to_string())?;
-                }
+                write_to_file(&graph, output).map_err(|e| e.to_string())?;
 
                 Ok(())
             });
