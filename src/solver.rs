@@ -16,7 +16,7 @@ fn is_invertable(
     x: TernaryBitVector,
     s: BitVector,
     t: BitVector,
-    d: ArgumentSide,
+    _d: ArgumentSide,
 ) -> bool {
     match instruction {
         Instruction::Add(_) | Instruction::Addi(_) => x.mcb(t - s),
@@ -30,71 +30,8 @@ fn is_invertable(
                 && (s == BitVector(0) || (!s.odd() || x.mcb(t * s.modinverse().unwrap())))
                 && (s.odd() || (x << s.ctz()).mcb(y(s, t) << s.ctz()))
         }
-        Instruction::Divu(i) => {
-            if d == ArgumentSide::Lhs {
-                // x / s = t
-                if (s * t) / s == t {
-                    if t == BitVector(0) {
-                        if !(x.0 < s) {
-                            false
-                        }
-                    }
-
-                    // assumed: t == 0 implies xlo < s
-
-                    if t != BitVector(0) && s != BitVector(0){
-                        let c = mulo(s, t + BitVector(1)) || addo(BitVector(1), t);
-                        if c {
-                            true
-                        } else {
-                            let y = x.constant_bits();
-                            if y < s * t + BitVector(1) {
-                                // assumed: c implies y <= ones
-                                // where ones is lenght of x, this just checks that x and y have the same lenght
-                                true
-                            }
-                        }
-                    }
-
-                    true
-                } else {
-                    false
-                }
-            } else {
-                // s / x = t
-                if s / (s / t) == t {
-                    if t != BitVector::ones() {
-                        if !(x.1 > 0) {
-                            false
-                        }
-
-                        if s != BitVector(0) || t != BitVector(0) {
-                            if !(s / x.1 < t) {
-                                false
-                            }
-                        }
-
-                        if t == BitVector::ones() {
-                            let y = x.constant_bits();
-                            if !(y >= BitVector(0) && y <= s / t) {
-                                false
-                            }
-                        }
-
-                        if t != BitVector::ones() {
-                            let y = x.constant_bits();
-                            if !(y > t + BitVector(1) && y <= s / t) {
-                                false
-                            }
-                        }
-
-                        true
-                    }
-
-                } else {
-                    false
-                }
-            }
+        Instruction::Divu(_i) => {
+            unimplemented!()
         }
         _ => unimplemented!(),
     }
@@ -126,87 +63,9 @@ fn is_consistent(instruction: Instruction, x: TernaryBitVector, t: BitVector) ->
             (!(t != BitVector(0)) || (x.1 != BitVector(0)))
                 && (!t.odd() || (x.1.lsb() != 0))
                 && (t.odd() || value_exists(x, t))
-        }
-        Instruction::Divu(_) => {
-            // x/s = t
-            if d == ArgumentSide::Lhs {
-                if t == BitVector::ones() {
-                    if !(x.1 >= t) {
-                        false
-                    }
-                }
-
-                if t == BitVector(0) {
-                    if !(x.0 != BitVector::ones()){
-                        false
-                    }
-                }
-
-                if t != BitVector(0) {
-                    if t != Bitvector::ones() {
-                        if t != BitVector(1) {
-                            if !x.mcb(t) {
-                                if mulo(BitVector(2), t){
-                                    false
-                                }
-                                //this currently only works for ranges NOT for ternary vectors
-                                //TODO: adopt an EFFICIENT way to do this for ternary vectors
-                                let y = t / x.1;
-                                if t * y < x.0 {
-                                    let o = x.0 - t * y;
-                                } else {
-                                    let o = BitVector(0);
-                                }
-
-                                if y == BitVector(0) {
-                                    false
-                                }
-
-                                //c = min(y-1,x.1-y*t)
-                                // o>=c
-                                if o > y - BitVector(1) || o > x.1 - y * t {
-                                    false
-                                }
-
-                                if mulo(y, t) {
-                                    false
-                                }
-
-                                if addo(y*t, o) {
-                                    false
-                                }
-                            }
-                        }
-                    }
-                }
-
-                true
-            } else {
-                // s/x = t
-                if t == BitVector::ones() {
-                    if !(x.mcb(BitVector(0)) || x.mcb(BitVector(1))) {
-                        false
-                    }
-                }
-                if t != BitVector::ones() {
-                    if mulo(x.0, t) {
-                        false
-                    }
-                    let y = x.constant_bits();
-                    if y == BitVector(0) {
-                        // (!x.1+BitVector(1) & x.1) is a BitVector with one the first set bit from x.1 set
-                        // Which when added to x.0 is the next bigger BitVector with x.mcb(y) true
-                        let y = y + (!x.1+BitVector(1) & x.1);
-                        if y == BitVector(0) {
-                            false
-                        }
-                    }
-                    if mulo(y, t) {
-                        false
-                    }
-                    true
-                }
-            }
+        },
+        Instruction::Divu(_i) => {
+            unimplemented!()
         }
         _ => unimplemented!(),
     }
@@ -635,6 +494,7 @@ mod tests {
     fn instr_to_str(i: Instruction) -> &'static str {
         match i {
             Instruction::Mul(_) => "*",
+            Instruction::Divu(_) => "/",
             _ => unimplemented!(),
         }
     }
@@ -653,25 +513,9 @@ mod tests {
         let t = BitVector(t);
 
         if side == ArgumentSide::Lhs {
-            assert!(
-                is_invertable(op, x, s, t, side) == result,
-                "{:?} {} {:?} == {:?}   {}",
-                x,
-                instr_to_str(op),
-                s,
-                t,
-                msg
-            );
+            assert_eq!(is_invertable(op, x, s, t, side), result, "{:?} {} {:?} == {:?}   {}", x, instr_to_str(op), s, t, msg);
         } else {
-            assert!(
-                is_invertable(op, x, s, t, side) == result,
-                "{:?} {} {:?} == {:?}   {}",
-                s,
-                instr_to_str(op),
-                x,
-                t,
-                msg
-            );
+            assert_eq!(is_invertable(op, x, s, t, side), result, "{:?} {} {:?} == {:?}   {}", s, instr_to_str(op), x, t, msg);
         }
     }
 
@@ -686,15 +530,7 @@ mod tests {
         let x = TernaryBitVector::lit(x);
         let s = BitVector(s);
         let t = BitVector(t);
-        assert!(
-            is_consistent(op, x, t) == result,
-            "{:?} {} {:?} == {:?}   {}",
-            x,
-            instr_to_str(op),
-            s,
-            t,
-            msg
-        );
+        assert_eq!(is_consistent(op, x, t), result, "{:?} {} {:?} == {:?}   {}", x, instr_to_str(op), s, t, msg);
     }
 
     fn test_inverse_value_computation<F>(
@@ -780,6 +616,18 @@ mod tests {
     // TODO: add tests for ADD
 
     const MUL: Instruction = Instruction::Mul(RType(0));
+    const DIVU: Instruction = Instruction::Divu(RType(0));
+
+    #[test]
+    fn check_invertability_condition_for_divu() {
+        test_invertability(DIVU, "1", 1, 1, ArgumentSide::Rhs, true, "trivial division");
+        test_invertability(DIVU, "110", 1, 1, ArgumentSide::Rhs, true, "trivial division");
+
+        test_invertability(DIVU, "1", 1, 1, ArgumentSide::Lhs, true, "trivial division");
+        test_invertability(DIVU, "110", 1, 1, ArgumentSide::Lhs, true, "trivial division");
+
+        test_invertability(DIVU, "10", 3, 2, ArgumentSide::Lhs, true, "trivial division");
+    }
 
     #[test]
     fn check_invertability_condition_for_mul() {

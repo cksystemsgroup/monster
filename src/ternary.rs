@@ -72,16 +72,18 @@ impl TernaryBitVector {
     pub fn constant_bits(&self) -> BitVector {
         self.0 & self.1
     }
+
+
+    /*pub fn mulo(s: BitVector, x: TernaryBitVector) -> bool {
+        s.0.overflowing_mul(x.0).1
+    }
+
+    pub fn addo(s: BitVector, x: TernaryBitVector) -> bool {
+        s.0.overflowing_add(x.0).1
+    }*/
 }
 
-/// returns true iff s * x => overflow
-pub fn mulo(s: BitVector, x: TernaryBitVector) -> bool {
-    s.0.overflowing_mul(x.0).1
-}
 
-pub fn addo(s: BitVector, x: TernaryBitVector) -> bool {
-    s.0.overflowing_add(x.0).1
-}
 
 impl Shl<u32> for TernaryBitVector {
     type Output = TernaryBitVector;
