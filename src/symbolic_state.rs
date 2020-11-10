@@ -56,6 +56,7 @@ impl fmt::Display for BVOperator {
                 BVOperator::Not => "!",
                 BVOperator::Equals => "=",
                 BVOperator::BitwiseAnd => "&",
+                BVOperator::Sltu => "<",
             }
         )
     }
