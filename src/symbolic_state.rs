@@ -1,22 +1,26 @@
 use crate::bitvec::BitVector;
 use crate::solver::Solver;
+use log::{debug, trace, Level};
 pub use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::Graph;
+use petgraph::{
+    visit::{VisitMap, Visitable},
+    Direction, Graph,
+};
 use riscv_decode::Instruction;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
 #[derive(Clone, Debug, Copy, Eq, Hash, PartialEq)]
-pub enum ArgumentSide {
+pub enum OperandSide {
     Lhs,
     Rhs,
 }
 
-impl ArgumentSide {
+impl OperandSide {
     #[allow(dead_code)]
     pub fn other(&self) -> Self {
         match self {
-            ArgumentSide::Lhs => ArgumentSide::Rhs,
-            ArgumentSide::Rhs => ArgumentSide::Lhs,
+            OperandSide::Lhs => OperandSide::Rhs,
+            OperandSide::Rhs => OperandSide::Lhs,
         }
     }
 }
@@ -39,6 +43,24 @@ impl BVOperator {
     }
 }
 
+impl fmt::Display for BVOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BVOperator::Add => "+",
+                BVOperator::Sub => "-",
+                BVOperator::Mul => "*",
+                BVOperator::Divu => "/",
+                BVOperator::Not => "!",
+                BVOperator::Equals => "=",
+                BVOperator::BitwiseAnd => "&",
+            }
+        )
+    }
+}
+
 pub enum Query {
     Equals((SymbolId, u64)),
     NotEquals((SymbolId, u64)),
@@ -52,6 +74,7 @@ pub enum Node {
     Operator(BVOperator),
 }
 
+pub type Formula = Graph<Node, OperandSide>;
 pub type SymbolId = NodeIndex;
 
 fn instruction_to_bv_operator(instruction: Instruction) -> BVOperator {
@@ -65,14 +88,30 @@ fn instruction_to_bv_operator(instruction: Instruction) -> BVOperator {
     }
 }
 
-pub type Formula = Graph<Node, ArgumentSide>;
+pub fn get_operands(graph: &Formula, sym: SymbolId) -> (SymbolId, Option<SymbolId>) {
+    let mut iter = graph.neighbors_directed(sym, Direction::Incoming).detach();
+
+    let lhs = iter
+        .next(graph)
+        .expect("get_operands() should not be called on operators without operands")
+        .1;
+
+    let rhs = iter.next(graph).map(|n| n.1);
+
+    assert!(
+        iter.next(graph) == None,
+        "operators with arity 1 or 2 are supported only"
+    );
+
+    (lhs, rhs)
+}
 
 #[derive(Debug)]
 pub struct SymbolicState<S>
 where
     S: Solver,
 {
-    data_flow: Graph<Node, ArgumentSide>,
+    data_flow: Graph<Node, OperandSide>,
     path_condition: Option<NodeIndex>,
     solver: Rc<RefCell<S>>,
 }
@@ -105,7 +144,11 @@ where
     pub fn create_const(&mut self, value: u64) -> SymbolId {
         let constant = Node::Constant(value);
 
-        self.data_flow.add_node(constant)
+        let i = self.data_flow.add_node(constant);
+
+        trace!("new constant: x{} := {:#x}", i.index(), value);
+
+        i
     }
 
     pub fn create_operator(
@@ -114,19 +157,31 @@ where
         lhs: SymbolId,
         rhs: SymbolId,
     ) -> SymbolId {
-        let op = Node::Operator(instruction_to_bv_operator(instruction));
-        let op_idx = self.data_flow.add_node(op);
+        let op = instruction_to_bv_operator(instruction);
+        let n = Node::Operator(op);
+        let n_idx = self.data_flow.add_node(n);
 
-        self.data_flow.add_edge(lhs, op_idx, ArgumentSide::Lhs);
-        self.data_flow.add_edge(rhs, op_idx, ArgumentSide::Rhs);
+        self.connect_operator(lhs, rhs, n_idx);
 
-        op_idx
+        trace!(
+            "new operator: x{} := x{} {} x{}",
+            n_idx.index(),
+            lhs.index(),
+            op,
+            rhs.index()
+        );
+
+        n_idx
     }
 
     pub fn create_input(&mut self, name: &str) -> SymbolId {
         let node = Node::Input(String::from(name));
 
-        self.data_flow.add_node(node)
+        let idx = self.data_flow.add_node(node);
+
+        trace!("new input: x{} := {:?}", idx.index(), name);
+
+        idx
     }
 
     fn append_path_condition(
@@ -139,8 +194,7 @@ where
             let con_idx = self
                 .data_flow
                 .add_node(Node::Operator(BVOperator::BitwiseAnd));
-            let con_edge_idx1 = self.data_flow.add_edge(pc_idx, con_idx, ArgumentSide::Lhs);
-            let con_edge_idx2 = self.data_flow.add_edge(r, con_idx, ArgumentSide::Rhs);
+            let (con_edge_idx1, con_edge_idx2) = self.connect_operator(pc_idx, r, con_idx);
 
             ns.push(con_idx);
             es.push(con_edge_idx1);
@@ -158,17 +212,15 @@ where
                 let root_idx = self.data_flow.add_node(Node::Operator(BVOperator::Equals));
 
                 let const_idx = self.data_flow.add_node(Node::Constant(c));
-                let const_edge_idx =
-                    self.data_flow
-                        .add_edge(const_idx, root_idx, ArgumentSide::Lhs);
+                let const_edge_idx = self
+                    .data_flow
+                    .add_edge(const_idx, root_idx, OperandSide::Lhs);
 
-                let sym_edge_idx = self.data_flow.add_edge(sym, root_idx, ArgumentSide::Rhs);
+                let sym_edge_idx = self.data_flow.add_edge(sym, root_idx, OperandSide::Rhs);
 
                 if let Query::NotEquals(_) = query {
                     let not_idx = self.data_flow.add_node(Node::Operator(BVOperator::Not));
-                    let not_edge_idx =
-                        self.data_flow
-                            .add_edge(root_idx, not_idx, ArgumentSide::Lhs);
+                    let not_edge_idx = self.data_flow.add_edge(root_idx, not_idx, OperandSide::Lhs);
 
                     self.append_path_condition(
                         root_idx,
@@ -187,6 +239,40 @@ where
         }
     }
 
+    fn print_recursive<M: VisitMap<SymbolId>>(&self, n: NodeIndex, visit_map: &mut M) {
+        if visit_map.is_visited(&n) {
+            return;
+        }
+        visit_map.visit(n);
+
+        match &self.data_flow[n] {
+            Node::Operator(op) => {
+                let mut operands = self
+                    .data_flow
+                    .neighbors_directed(n, Direction::Incoming)
+                    .detach();
+
+                if op.is_unary() {
+                    let x = operands.next(&self.data_flow).unwrap().1;
+
+                    self.print_recursive(x, visit_map);
+
+                    debug!("x{} := {}x{}", n.index(), op, x.index());
+                } else {
+                    let lhs = operands.next(&self.data_flow).unwrap().1;
+                    let rhs = operands.next(&self.data_flow).unwrap().1;
+
+                    self.print_recursive(lhs, visit_map);
+                    self.print_recursive(rhs, visit_map);
+
+                    debug!("x{} := x{} {} x{}", n.index(), lhs.index(), op, rhs.index(),)
+                }
+            }
+            Node::Constant(c) => debug!("x{} := {}", n.index(), c),
+            Node::Input(name) => debug!("x{} := {:?}", n.index(), name),
+        }
+    }
+
     pub fn execute_query(&mut self, query: Query) -> Option<Vec<BitVector>> {
         // prepare graph for query
         let (root, cleanup_nodes, cleanup_edges) = match query {
@@ -196,10 +282,18 @@ where
                     (pc_idx, vec![], vec![])
                 } else {
                     // a path without a condition is always reachable
+                    debug!("path has no conditon and is therefore reachable");
                     return Some(vec![]);
                 }
             }
         };
+
+        if log::log_enabled!(Level::Debug) {
+            debug!("query to solve:");
+            let mut visited = self.data_flow.visit_map();
+            self.print_recursive(root, &mut visited);
+            debug!("assert x{} is 1", root.index());
+        }
 
         let result = self.solver.borrow_mut().solve(&self.data_flow, root);
 
@@ -213,17 +307,30 @@ where
         result
     }
 
+    fn connect_operator(
+        &mut self,
+        lhs: SymbolId,
+        rhs: SymbolId,
+        op: SymbolId,
+    ) -> (EdgeIndex, EdgeIndex) {
+        // assert: right hand side edge has to be inserted first
+        // solvers depend on edge insertion order!!!
+        (
+            self.data_flow.add_edge(rhs, op, OperandSide::Rhs),
+            self.data_flow.add_edge(lhs, op, OperandSide::Lhs),
+        )
+    }
+
     pub fn create_beq_path_condition(&mut self, decision: bool, lhs: SymbolId, rhs: SymbolId) {
         let node = Node::Operator(BVOperator::Equals);
         let mut pc_idx = self.data_flow.add_node(node);
 
-        self.data_flow.add_edge(lhs, pc_idx, ArgumentSide::Lhs);
-        self.data_flow.add_edge(rhs, pc_idx, ArgumentSide::Rhs);
+        self.connect_operator(lhs, rhs, pc_idx);
 
         if !decision {
             let not_idx = self.data_flow.add_node(Node::Operator(BVOperator::Not));
 
-            self.data_flow.add_edge(pc_idx, not_idx, ArgumentSide::Lhs);
+            self.data_flow.add_edge(pc_idx, not_idx, OperandSide::Lhs);
 
             pc_idx = not_idx;
         }
@@ -233,9 +340,7 @@ where
                 .data_flow
                 .add_node(Node::Operator(BVOperator::BitwiseAnd));
 
-            self.data_flow
-                .add_edge(old_pc_idx, con_idx, ArgumentSide::Lhs);
-            self.data_flow.add_edge(pc_idx, con_idx, ArgumentSide::Rhs);
+            self.connect_operator(old_pc_idx, pc_idx, con_idx);
 
             pc_idx = con_idx;
         }
