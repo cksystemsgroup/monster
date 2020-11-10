@@ -4,7 +4,7 @@ use crate::bitvec::*;
 use crate::symbolic_state::{ArgumentSide, BVOperator, Formula, Node, SymbolId as NodeIndex};
 use crate::ternary::*;
 use petgraph::{visit::EdgeRef, Direction};
-use rand::{random, Rng};
+use rand::{random, Rng, thread_rng, distributions::Uniform};
 
 pub type Assignment<T> = Vec<T>;
 
@@ -72,16 +72,16 @@ fn is_invertable(
         }
         BVOperator::Sltu => {
             // (x<s) = t
-            if _d == ArgumentSide::Lhs {
+            if d == ArgumentSide::Lhs {
                 if t == BitVector(1) {
                     if s == BitVector(0) {
                         return false
                     }
-                    if s > x.lo {
+                    if s > x.lo() {
                         return false
                     }
                 } else {
-                    if x.hi <= s {
+                    if x.hi() <= s {
                         return false
                     }
                 }
@@ -92,11 +92,11 @@ fn is_invertable(
                     if s == BitVector::ones() {
                         return false
                     }
-                    if s > x.hi {
+                    if s > x.hi() {
                         return false
                     }
                 } else {
-                    if x.lo > s {
+                    if x.lo() > s {
                         return false
                     }
                 }
@@ -116,7 +116,7 @@ fn is_invertable(
     }
 }
 
-fn is_consistent(op: BVOperator, x: TernaryBitVector, t: BitVector) -> bool {
+fn is_consistent(op: BVOperator, x: TernaryBitVector, t: BitVector, d: ArgumentSide) -> bool {
     match op {
         BVOperator::Add | BVOperator::Sub | BVOperator::Equals => true,
         BVOperator::Not => x.mcb(!t),
@@ -133,16 +133,16 @@ fn is_consistent(op: BVOperator, x: TernaryBitVector, t: BitVector) -> bool {
                 && implies(!t.odd(), || value_exists(x, t))
         }
         BVOperator::Sltu => {
-            if _d == ArgumentSide::Lhs {
+            if d == ArgumentSide::Lhs {
                 if t == BitVector(1) {
-                    if x.lo == BitVector::ones() {
+                    if x.lo() == BitVector::ones() {
                         return false
                     }
                 }
                 return true
             } else {
                 if t == BitVector(1) {
-                    if x.hi == BitVector(0) {
+                    if x.hi() == BitVector(0) {
                         return false
                     }
                 }
@@ -241,7 +241,7 @@ fn compute_inverse_value(
         BVOperator::Sub => match d {
             ArgumentSide::Lhs => t + s,
             ArgumentSide::Rhs => s - t,
-        },
+        }
         BVOperator::Mul => {
             let y = s >> s.ctz();
 
@@ -264,25 +264,25 @@ fn compute_inverse_value(
             (result_with_arbitrary & !x.constant_bit_mask()) | x.constant_bits()
         }
         BVOperator::Sltu => {
-            if _d == ArgumentSide::Lhs {
+            if d == ArgumentSide::Lhs {
                 // x<s == false
                 // therefore we need a random x that's x.1>=x>=s
                 if t == BitVector(0) {
-                    BitVector(rng.sample(s.0..=x.hi.0))
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(s.0, x.hi().0)))
                 // x<s == true
                 // therefore we need a random x that's s>x>=x.0
                 } else {
-                    BitVector(rng.sample(x.lo.0..s.0))
+                    BitVector(thread_rng().sample(Uniform::new(x.lo().0, s.0)))
                 }
             } else {
                 // s<x == false
                 // therefore we need a random x that's s>=x>=x.0
                 if t == BitVector(0) {
-                    BitVector(rng.sample(x.lo.0..=s.0))
+                        BitVector(thread_rng().sample(Uniform::new_inclusive(x.lo().0, s.0)))
                 // s<x == true
                 // therefore we need a random x that's x.1>=x>s
                 } else {
-                    BitVector(rng.sample(s.0+1..=x.hi.0))
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(s.0+1, x.hi().0)))
                 }
 
             }
@@ -341,25 +341,25 @@ fn compute_consistent_value(
             if _d == ArgumentSide::Lhs {
                 // x<s == false
                 if t == BitVector(0) {
-                    BitVector(rng.sample(x.lo.0..=x.hi.0))
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(x.lo().0, x.hi().0)))
                 // x<s == true
                 } else {
-                    if x.hi == BitVector::ones() {
-                        BitVector(rng.sample(x.lo.0..x.hi.0))
+                    if x.hi() == BitVector::ones() {
+                        BitVector(thread_rng().sample(Uniform::new(x.lo().0, x.hi().0)))
                     } else {
-                        BitVector(rng.sample(x.lo.0..=x.hi.0))
+                        BitVector(thread_rng().sample(Uniform::new_inclusive(x.lo().0, x.hi().0)))
                     }
                 }
             } else {
                 // s<x == false
                 if t == BitVector(0) {
-                    BitVector(rng.sample(x.lo.0..=x.hi.0))
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(x.lo().0, x.hi().0)))
                 // s<x == true
                 } else {
-                    if x.lo == BitVector(0) {
-                        BitVector(rng.sample(1..=x.hi.0))
+                    if x.lo() == BitVector(0) {
+                        BitVector(thread_rng().sample(Uniform::new_inclusive(1, x.hi().0)))
                     } else {
-                        BitVector(rng.sample(x.lo.0..=x.hi.0))
+                        BitVector(thread_rng().sample(Uniform::new_inclusive(x.lo().0, x.hi().0)))
                     }
                 }
             }
@@ -585,7 +585,7 @@ fn sat(
 
                         let x = at[nx.index()];
 
-                        if !is_consistent(op, x, t) {
+                        if !is_consistent(op, x, t, side) {
                             break;
                         }
 
@@ -721,7 +721,7 @@ mod tests {
         let x = TernaryBitVector::lit(x);
         let t = BitVector(t);
         assert!(
-            is_consistent(op, x, t) == result,
+            is_consistent(op, x, t, side) == result,
             "{:?} {:?} s == {:?}   {}",
             x,
             op,
