@@ -83,13 +83,13 @@ fn is_invertable(
         }
         BVOperator::Divu => {
             if s == BitVector(0) || t == BitVector(0) {
-                return false
+                return false;
             }
             if d == OperandSide::Lhs {
                 (s * t) / s == t
             } else {
                 if t > s {
-                    return false
+                    return false;
                 }
                 s / (s / t) == t
             }
@@ -104,8 +104,6 @@ fn is_invertable(
             implies(t != BitVector(0), || x.mcb(s))
                 && implies(t == BitVector(0), || (x.hi() != x.lo()) || (x.hi() != s))
         }
-        // all operations are implemented for now
-        //_ => unimplemented!("can not check invertability for operator: {:?}", op),
     }
 }
 
@@ -129,8 +127,6 @@ fn is_consistent(op: BVOperator, x: TernaryBitVector, t: BitVector) -> bool {
             // This is only the case when NOT considering constant bits (see page 5: "Consistency Conditions." in the ternany pop-local-search paper)
             true
         }
-        // all operations are implemented for now
-        //_ => unimplemented!("can not check consistency for operator: {:?}", op),
     }
 }
 
@@ -277,7 +273,7 @@ fn compute_inverse_value(
                 s
             }
         }
-        _ => unimplemented!("compute inverse value for binary operator: {:?}", op),
+        _ => unreachable!("unkown operator or unary operator: {:?}", op),
     }
 }
 
@@ -319,7 +315,7 @@ fn compute_consistent_value(
         BVOperator::BitwiseAnd => {
             (BitVector(random::<u64>()) & !x.constant_bit_mask()) | x.constant_bits() | t
         }
-        _ => unimplemented!("compute consitent value for binary operator: {:?}", op),
+        _ => unreachable!("unkown operator for consistent value: {:?}", op),
     }
 }
 
@@ -327,7 +323,7 @@ fn compute_consistent_value(
 fn is_invertable_for_unary_op(op: BVOperator, x: TernaryBitVector, t: BitVector) -> bool {
     match op {
         BVOperator::Not => x.mcb(!t),
-        _ => unimplemented!("compute inverse value for unary operator: {:?}", op),
+        _ => unreachable!("not unary operator: {:?}", op),
     }
 }
 
@@ -344,7 +340,7 @@ fn compute_inverse_value_for_unary_op(
                 BitVector(0)
             }
         }
-        _ => unimplemented!("compute consistent value for unary operator: {:?}", op),
+        _ => unreachable!("not unary operator: {:?}", op),
     }
 }
 
@@ -493,8 +489,6 @@ fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: SymbolId
                         BitVector(0)
                     }
                 }),
-                // all operations are implemented for now
-                //_ => unimplemented!("propagation of operator: {:?}", op),
             }
             f.neighbors_directed(n, Direction::Outgoing)
                 .for_each(|n| propagate_assignment(f, ab, n));
