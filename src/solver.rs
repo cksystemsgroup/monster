@@ -318,7 +318,7 @@ fn compute_inverse_value(
                 // therefore we need a random x that's x.1>=x>s
                 BitVector(thread_rng().sample(Uniform::new_inclusive(s.0 + 1, x.hi().0)))
             }
-        },
+        }
         BVOperator::Divu => match d {
             OperandSide::Lhs => t * s,
             OperandSide::Rhs => s / t,
@@ -379,7 +379,7 @@ fn compute_consistent_value(
                 OperandSide::Lhs => t * v,
                 OperandSide::Rhs => v / t,
             }
-        },
+        }
         BVOperator::Sltu => {
             if d == OperandSide::Lhs {
                 if t == BitVector(0) {
@@ -907,22 +907,12 @@ mod tests {
 
                 compute_inverse_value(op, x, computed, t, d.other())
             }
-            BVOperator::Sltu => compute_inverse_value(op, x, computed, t, d.other()),
+            BVOperator::Sltu => compute_inverse_value(op, x, computed, t, d),
             BVOperator::Divu => compute_inverse_value(op, x, computed, t, d.other()),
             _ => unimplemented!(),
         };
 
         if d == OperandSide::Lhs {
-            assert_eq!(
-                f(computed, inverse),
-                t,
-                "{:?} {:?} {:?} == {:?}",
-                computed,
-                op,
-                inverse,
-                t
-            );
-        } else {
             assert_eq!(
                 f(inverse, computed),
                 t,
@@ -930,6 +920,16 @@ mod tests {
                 inverse,
                 op,
                 computed,
+                t
+            );
+        } else {
+            assert_eq!(
+                f(computed, inverse),
+                t,
+                "{:?} {:?} {:?} == {:?}",
+                computed,
+                op,
+                inverse,
                 t
             );
         }
