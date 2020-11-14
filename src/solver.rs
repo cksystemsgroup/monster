@@ -376,8 +376,8 @@ fn compute_consistent_value(
         BVOperator::Divu => {
             let v = BitVector(random::<u64>());
             match d {
-                OperandSide::Lhs => t * v,
-                OperandSide::Rhs => v / t,
+                OperandSide::Lhs => v / t,
+                OperandSide::Rhs => t * v,
             }
         }
         BVOperator::Sltu => {
@@ -901,14 +901,14 @@ mod tests {
                 let x = TernaryBitVector::new(0, u64::max_value());
 
                 assert!(
-                    is_invertable(op, x, computed, t, d.other()),
+                    is_invertable(op, x, computed, t, d),
                     "choose values which are invertable..."
                 );
 
-                compute_inverse_value(op, x, computed, t, d.other())
+                compute_inverse_value(op, x, computed, t, d)
             }
             BVOperator::Sltu => compute_inverse_value(op, x, computed, t, d),
-            BVOperator::Divu => compute_inverse_value(op, x, computed, t, d.other()),
+            BVOperator::Divu => compute_inverse_value(op, x, computed, t, d),
             _ => unimplemented!(),
         };
 
