@@ -4,6 +4,7 @@ use std::{fmt::Display, path::Path};
 
 mod cli;
 
+use monster::engine::EngineResult;
 use monster::{
     cfg::{build_cfg_from_file, write_to_file},
     disassemble::disassemble_riscu,
@@ -65,7 +66,7 @@ fn main() {
             });
         }
         Some(("execute", args)) => {
-            handle_error(|| -> Result<(), String> {
+            handle_error(|| -> Result<EngineResult, String> {
                 let input = Path::new(args.value_of("input-file").unwrap());
                 let solver = args.value_of("solver").unwrap();
 

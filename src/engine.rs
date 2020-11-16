@@ -29,8 +29,32 @@ pub enum Backend {
     Z3,
 }
 
+pub enum ExitReason {
+    ExitGreaterZero(String),
+    DivisionByZero(String),
+    InvalidMemory(String),
+}
+
+impl fmt::Display for ExitReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExitReason::ExitGreaterZero(s)
+            | ExitReason::DivisionByZero(s)
+            | ExitReason::InvalidMemory(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub struct EngineResult {
+    pc: u64,
+    entry_address: u64,
+    assignments: HashMap<String, BitVector>,
+    reason: ExitReason,
+}
+
 // TODO: What should the engine return as result?
-pub fn execute<P>(input: P, with: Backend) -> Result<(), String>
+pub fn execute<P>(input: P, with: Backend) -> Result<EngineResult, String>
 where
     P: AsRef<Path>,
 {
@@ -46,6 +70,8 @@ where
             let mut executor = Engine::new(ByteSize::mib(1), &program, &mut strategy, state);
 
             executor.run();
+
+            Ok(executor.engine_result.unwrap())
         }
         Backend::Boolector => {
             let solver = Rc::new(RefCell::new(Boolector::new()));
@@ -54,6 +80,8 @@ where
             let mut executor = Engine::new(ByteSize::mib(1), &program, &mut strategy, state);
 
             executor.run();
+
+            Ok(executor.engine_result.unwrap())
         }
         Backend::Z3 => {
             let solver = Rc::new(RefCell::new(Z3::new()));
@@ -62,10 +90,10 @@ where
             let mut executor = Engine::new(ByteSize::mib(1), &program, &mut strategy, state);
 
             executor.run();
+
+            Ok(executor.engine_result.unwrap())
         }
     }
-
-    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -97,6 +125,7 @@ where
     memory: Vec<Value>,
     strategy: &'a mut E,
     is_exited: bool,
+    engine_result: Option<EngineResult>,
 }
 
 impl<'a, E, S> Engine<'a, E, S>
@@ -169,6 +198,7 @@ where
             memory,
             strategy,
             is_exited: false,
+            engine_result: None,
         }
     }
 
@@ -185,7 +215,11 @@ where
         }
     }
 
-    fn handle_solver_result(&self, reason: &str, solver_result: Option<Assignment<BitVector>>) {
+    fn handle_solver_result(
+        &mut self,
+        reason: ExitReason,
+        solver_result: Option<Assignment<BitVector>>,
+    ) {
         if let Some(assignment) = solver_result {
             let printable_assignments = self.symbolic_state.get_input_assignments(&assignment);
 
@@ -193,7 +227,13 @@ where
             print_assignment(&printable_assignments);
 
             info!("exiting execution engine");
-            std::process::exit(0);
+
+            self.engine_result = Some(EngineResult {
+                pc: self.pc,
+                entry_address: 0,
+                assignments: printable_assignments,
+                reason,
+            });
         }
     }
 
@@ -203,7 +243,7 @@ where
         let solver_result = self.symbolic_state.execute_query(Query::Reachable);
 
         self.handle_solver_result(
-            format!("access to unintialized memory in {}", instruction).as_str(),
+            ExitReason::InvalidMemory(format!("access to unintialized memory in {}", instruction)),
             solver_result,
         );
     }
@@ -222,11 +262,10 @@ where
             let solver_result = self.symbolic_state.execute_query(Query::Reachable);
 
             self.handle_solver_result(
-                format!(
+                ExitReason::InvalidMemory(format!(
                     "address {:#x} not double word aligned in {}",
                     address, instruction
-                )
-                .as_str(),
+                )),
                 solver_result,
             );
 
@@ -249,13 +288,12 @@ where
             let solver_result = self.symbolic_state.execute_query(Query::Reachable);
 
             self.handle_solver_result(
-                format!(
+                ExitReason::InvalidMemory(format!(
                     "address {:#x} out of virtual address range (0x0 - {:#x}) in {}",
                     address,
                     self.memory.len() * 8,
                     instruction,
-                )
-                .as_str(),
+                )),
                 solver_result,
             );
 
@@ -302,7 +340,10 @@ where
                     .symbolic_state
                     .execute_query(Query::Equals((divisor, 0)));
 
-                self.handle_solver_result("division by zero in DIVU", solver_result);
+                self.handle_solver_result(
+                    ExitReason::DivisionByZero(String::from("division by zero in DIVU")),
+                    solver_result,
+                );
             }
             Value::Concrete(divisor) if divisor == 0 => {
                 // TODO: fix this possible exit point when refactoring engine interface
@@ -310,7 +351,10 @@ where
 
                 let solver_result = self.symbolic_state.execute_query(Query::Reachable);
 
-                self.handle_solver_result("division by zero in DIVU", solver_result);
+                self.handle_solver_result(
+                    ExitReason::DivisionByZero(String::from("division by zero in DIVU")),
+                    solver_result,
+                );
             }
             _ => {}
         }
@@ -559,7 +603,7 @@ where
                 // TODO: fix this possible exit point when refactoring engine interface
                 self.check_for_uninitialized_memory("beq", v1, v2);
 
-                trace!("could not find input assignment => exeting this context");
+                trace!("could not find input assignment => exiting this context");
 
                 self.is_exited = true;
             }
@@ -576,7 +620,10 @@ where
                     .symbolic_state
                     .execute_query(Query::NotEquals((exit_code, 0)));
 
-                self.handle_solver_result("exit_code > 0", result);
+                self.handle_solver_result(
+                    ExitReason::ExitGreaterZero(String::from("exit_code > 0")),
+                    result,
+                );
             }
             Value::Concrete(exit_code) => {
                 if exit_code > 0 {
@@ -588,7 +635,10 @@ where
                     // TODO: fix this possible exit point when refactoring engine interface
                     let result = self.symbolic_state.execute_query(Query::Reachable);
 
-                    self.handle_solver_result("exit_code > 0", result);
+                    self.handle_solver_result(
+                        ExitReason::ExitGreaterZero(String::from("exit_code > 0")),
+                        result,
+                    );
                 } else {
                     trace!("exiting context with exit_code 0");
                 }
