@@ -1,0 +1,7 @@
+#!/bin/bash
+
+regexp="^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z ]+\))?: [\w ]+$"
+
+if [[ ! $message =~ $regexp ]]; then
+  exit 1
+fi
