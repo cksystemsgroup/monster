@@ -1,5 +1,5 @@
 use crate::bitvec::BitVector;
-use crate::solver::{Assignment, Solver};
+use crate::solver::{Solver, SolverReturns};
 use crate::symbolic_state::{
     get_operands, BVOperator, Formula,
     Node::{Constant, Input, Operator},
@@ -30,7 +30,7 @@ impl Solver for Z3 {
         "Z3"
     }
 
-    fn solve_impl(&mut self, graph: &Formula, root: SymbolId) -> Option<Assignment<BitVector>> {
+    fn solve_impl(&mut self, graph: &Formula, root: SymbolId) -> SolverReturns {
         let config = Config::default();
         let ctx = Context::new(&config);
 
@@ -45,7 +45,7 @@ impl Solver for Z3 {
             SatResult::Sat => {
                 let m = solver.get_model().unwrap();
 
-                Some(
+                SolverReturns::Result(
                     graph
                         .node_indices()
                         .filter(|i| matches!(graph[*i], Input(_)))
@@ -53,13 +53,13 @@ impl Solver for Z3 {
                             let input_bv = bvs.get(&i).unwrap().as_bv().unwrap();
                             let result_bv = m.eval(&input_bv).unwrap();
                             let result_value = result_bv.as_u64().unwrap();
-
                             BitVector(result_value)
                         })
                         .collect(),
                 )
             }
-            _ => None,
+            SatResult::Unknown => SolverReturns::Timeout,
+            SatResult::Unsat => SolverReturns::NoResult,
         }
     }
 }

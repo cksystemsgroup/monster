@@ -1,3 +1,4 @@
+use crate::solver::SolverReturns;
 use crate::{
     bitvec::BitVector,
     boolector::Boolector,
@@ -589,6 +590,7 @@ where
                     let result = self.symbolic_state.execute_query(Query::Reachable);
 
                     self.handle_solver_result("exit_code > 0", result);
+
                 } else {
                     trace!("exiting context with exit_code 0");
                 }

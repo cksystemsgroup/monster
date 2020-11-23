@@ -1,5 +1,5 @@
 use crate::bitvec::BitVector;
-use crate::solver::Solver;
+use crate::solver::{Solver, SolverReturns};
 use log::{debug, trace, Level};
 pub use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::{
@@ -274,7 +274,7 @@ where
         }
     }
 
-    pub fn execute_query(&mut self, query: Query) -> Option<Vec<BitVector>> {
+    pub fn execute_query(&mut self, query: Query) -> SolverReturns {
         // prepare graph for query
         let (root, cleanup_nodes, cleanup_edges) = match query {
             Query::Equals(_) | Query::NotEquals(_) => self.prepare_query(query),
@@ -284,7 +284,7 @@ where
                 } else {
                     // a path without a condition is always reachable
                     debug!("path has no conditon and is therefore reachable");
-                    return Some(vec![]);
+                    return SolverReturns::Result(vec![]);
                 }
             }
         };
