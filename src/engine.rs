@@ -5,7 +5,7 @@ use crate::{
     cfg::build_cfg_from_file,
     elf::Program,
     exploration_strategy::{ExplorationStrategy, ShortestPathStrategy},
-    solver::{Assignment, MonsterSolver, Solver},
+    solver::{MonsterSolver, Solver},
     symbolic_state::{Query, SymbolId, SymbolicState},
     z3::Z3,
 };
@@ -186,8 +186,8 @@ where
         }
     }
 
-    fn handle_solver_result(&self, reason: &str, solver_result: Option<Assignment<BitVector>>) {
-        if let Some(assignment) = solver_result {
+    fn handle_solver_result(&self, reason: &str, solver_result: SolverReturns) {
+        if let SolverReturns::Result(assignment) = solver_result {
             let printable_assignments = self.symbolic_state.get_input_assignments(&assignment);
 
             info!("{}: found input assignment", reason);
@@ -590,7 +590,6 @@ where
                     let result = self.symbolic_state.execute_query(Query::Reachable);
 
                     self.handle_solver_result("exit_code > 0", result);
-
                 } else {
                     trace!("exiting context with exit_code 0");
                 }
