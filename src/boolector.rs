@@ -1,5 +1,5 @@
 use crate::bitvec::BitVector;
-use crate::solver::{Assignment, Solver};
+use crate::solver::{Solver, SolverReturns};
 use crate::symbolic_state::{
     get_operands, BVOperator, Formula,
     Node::{Constant, Input, Operator},
@@ -31,7 +31,7 @@ impl Solver for Boolector {
         "Boolector"
     }
 
-    fn solve_impl(&mut self, graph: &Formula, root: SymbolId) -> Option<Assignment<BitVector>> {
+    fn solve_impl(&mut self, graph: &Formula, root: SymbolId) -> SolverReturns {
         let solver = Rc::new(Btor::new());
         solver.set_opt(BtorOption::ModelGen(ModelGen::All));
         solver.set_opt(BtorOption::Incremental(true));
@@ -41,16 +41,18 @@ impl Solver for Boolector {
         let bv = traverse(graph, root, &solver, &mut bvs);
         bv.assert();
 
-        if let SolverResult::Sat = solver.sat() {
-            let assignments = graph
-                .node_indices()
-                .filter(|i| matches!(graph[*i], Input(_)))
-                .map(|i| BitVector(bvs.get(&i).unwrap().get_a_solution().as_u64().unwrap()))
-                .collect();
+        match solver.sat() {
+            SolverResult::Sat => {
+                let assignments = graph
+                    .node_indices()
+                    .filter(|i| matches!(graph[*i], Input(_)))
+                    .map(|i| BitVector(bvs.get(&i).unwrap().get_a_solution().as_u64().unwrap()))
+                    .collect();
 
-            Some(assignments)
-        } else {
-            None
+                SolverReturns::Result(assignments)
+            }
+            SolverResult::Unsat => SolverReturns::NoResult,
+            SolverResult::Unknown => SolverReturns::Timeout,
         }
     }
 }

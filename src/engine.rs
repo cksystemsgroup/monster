@@ -1,3 +1,4 @@
+use crate::solver::SolverReturns;
 use crate::{
     bitvec::BitVector,
     boolector::Boolector,
@@ -447,7 +448,7 @@ where
                     .symbolic_state
                     .execute_query(Query::NotEquals((exit_code, 0)));
 
-                if let Some(assignment) = result {
+                if let SolverReturns::Result(assignment) = result {
                     let printable_assignments =
                         self.symbolic_state.get_input_assignments(&assignment);
 
@@ -469,7 +470,7 @@ where
 
                     let result = self.symbolic_state.execute_query(Query::Reachable);
 
-                    if let Some(assignment) = result {
+                    if let SolverReturns::Result(assignment) = result {
                         let printable_assignments =
                             self.symbolic_state.get_input_assignments(&assignment);
 

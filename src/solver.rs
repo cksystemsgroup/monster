@@ -6,13 +6,36 @@ use crate::ternary::*;
 use log::{debug, log_enabled, trace, Level};
 use petgraph::{visit::EdgeRef, Direction};
 use rand::{distributions::Uniform, random, thread_rng, Rng};
+use std::time::{Duration, Instant};
+
+pub enum SolverReturns {
+    Timeout,
+    NoResult,
+    Result(Assignment<BitVector>),
+}
+
+impl SolverReturns {
+    pub fn is_valid_result(&self) -> bool {
+        if let SolverReturns::Result(_assignment) = self {
+            return true;
+        }
+        false
+    }
+
+    pub fn return_result(&self) -> &Assignment<BitVector> {
+        if let SolverReturns::Result(assignment) = self {
+            return assignment;
+        }
+        panic!("Can not call return_result if there is no valid result!")
+    }
+}
 
 pub type Assignment<T> = Vec<T>;
 
 pub trait Solver {
     fn name() -> &'static str;
 
-    fn solve(&mut self, formula: &Formula, root: SymbolId) -> Option<Assignment<BitVector>> {
+    fn solve(&mut self, formula: &Formula, root: SymbolId) -> SolverReturns {
         debug!("try to solve with {} solver", Self::name());
 
         time_debug!("finished solving formula", {
@@ -20,7 +43,7 @@ pub trait Solver {
         })
     }
 
-    fn solve_impl(&mut self, formula: &Formula, root: SymbolId) -> Option<Assignment<BitVector>>;
+    fn solve_impl(&mut self, formula: &Formula, root: SymbolId) -> SolverReturns;
 }
 
 pub struct MonsterSolver {}
@@ -42,13 +65,13 @@ impl Solver for MonsterSolver {
         "Monster"
     }
 
-    fn solve_impl(&mut self, formula: &Formula, root: SymbolId) -> Option<Assignment<BitVector>> {
+    fn solve_impl(&mut self, formula: &Formula, root: SymbolId) -> SolverReturns {
         let ab = initialize_ab(formula);
         let at = compute_at(formula);
 
-        let result = sat(formula, root, at, ab);
+        let timeout_time = Duration::new(20, 0);
 
-        Some(result)
+        sat(formula, root, at, ab, timeout_time)
     }
 }
 
@@ -594,13 +617,17 @@ fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: SymbolId
 }
 
 // can only handle one Equals constrain with constant
+//TODO: add timeout here, return a solverresult which is statisfiable or not
 fn sat(
     formula: &Formula,
     root: SymbolId,
     at: Assignment<TernaryBitVector>,
     mut ab: Assignment<BitVector>,
-) -> Assignment<BitVector> {
+    timeout_time: Duration,
+) -> SolverReturns {
     let mut iterations = 0;
+
+    let start_time = Instant::now();
 
     while ab[root.index()] != BitVector(1) {
         let mut n = root;
@@ -610,6 +637,9 @@ fn sat(
         trace!("search {}: x{} <- 0x1", iterations, root.index());
 
         while !is_leaf(formula, n) {
+            if start_time.elapsed() > timeout_time {
+                return SolverReturns::Timeout;
+            }
             let (v, nx) = match formula[n] {
                 Node::Operator(op) => {
                     if op.is_unary() {
@@ -690,7 +720,7 @@ fn sat(
         }
     }
 
-    ab
+    SolverReturns::Result(ab)
 }
 
 #[cfg(test)]
@@ -734,9 +764,12 @@ mod tests {
         let mut solver = MonsterSolver::default();
         let result = solver.solve(&formula, root);
 
-        assert!(result.is_some(), "has result for trivial equals constrain");
+        assert!(
+            result.is_valid_result(),
+            "has result for trivial equals constrain"
+        );
         assert_eq!(
-            result.unwrap()[input_idx.index()],
+            result.return_result()[input_idx.index()],
             BitVector(10),
             "solver result of trivial equal constrain has right value"
         );
@@ -760,9 +793,9 @@ mod tests {
         let mut solver = MonsterSolver::default();
         let result = solver.solve(&formula, root);
 
-        assert!(result.is_some(), "has result for trivial add op");
+        assert!(result.is_valid_result(), "has result for trivial add op");
         assert_eq!(
-            result.unwrap()[input_idx.index()],
+            result.return_result()[input_idx.index()],
             BitVector(7),
             "solver result of trivial add op has right value"
         );
