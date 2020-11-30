@@ -41,13 +41,20 @@ impl Solver for Boolector {
         let bv = traverse(graph, root, &solver, &mut bvs);
         bv.assert();
 
-        match solver.sat() {
-            SolverResult::Sat => {
-                let assignments = graph
-                    .node_indices()
-                    .filter(|i| matches!(graph[*i], Input(_)))
-                    .map(|i| BitVector(bvs.get(&i).unwrap().get_a_solution().as_u64().unwrap()))
-                    .collect();
+        if let SolverResult::Sat = solver.sat() {
+            let assignments = graph
+                .node_indices()
+                .filter(|i| matches!(graph[*i], Input(_)))
+                .map(|i| {
+                    let bv = bvs.get(&i).expect("every input must be part of bvs");
+
+                    BitVector(
+                        bv.get_a_solution()
+                            .as_u64()
+                            .expect("BV always fits in 64 bits for our machine"),
+                    )
+                })
+                .collect();
 
                 SolverReturns::Result(assignments)
             }

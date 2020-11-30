@@ -3,17 +3,17 @@ use crate::{
     bitvec::BitVector,
     boolector::Boolector,
     cfg::build_cfg_from_file,
-    elf::Program,
     exploration_strategy::{ExplorationStrategy, ShortestPathStrategy},
     solver::{MonsterSolver, Solver},
     symbolic_state::{Query, SymbolId, SymbolicState},
     z3::Z3,
 };
+use anyhow::Result;
 use byteorder::{ByteOrder, LittleEndian};
 use bytesize::ByteSize;
 use log::{debug, info, trace};
-use riscv_decode::{types::*, Instruction, Register};
-use std::{cell::RefCell, collections::HashMap, fmt, mem::size_of, path::Path, rc::Rc};
+use riscu::{decode, types::*, Instruction, Program, ProgramSegment, Register};
+use std::{collections::HashMap, fmt, mem::size_of, path::Path, rc::Rc};
 
 #[allow(dead_code)]
 pub enum SyscallId {
@@ -31,42 +31,46 @@ pub enum Backend {
 }
 
 // TODO: What should the engine return as result?
-pub fn execute<P>(input: P, with: Backend) -> Result<(), String>
+pub fn execute<P>(
+    input: P,
+    with: Backend,
+    max_exection_depth: u64,
+    memory_size: ByteSize,
+) -> Result<()>
 where
     P: AsRef<Path>,
 {
     let ((graph, _), program) = build_cfg_from_file(input)?;
 
-    let mut strategy = ShortestPathStrategy::new(&graph, program.entry_address);
+    let strategy = ShortestPathStrategy::new(&graph, program.code.address);
 
     match with {
         Backend::Monster => {
-            let solver = Rc::new(RefCell::new(MonsterSolver::new()));
-            let state = Box::new(SymbolicState::new(solver));
-
-            let mut executor = Engine::new(ByteSize::mib(1), &program, &mut strategy, state);
-
-            executor.run();
+            create_and_run::<_, MonsterSolver>(&program, &strategy, max_exection_depth, memory_size)
         }
         Backend::Boolector => {
-            let solver = Rc::new(RefCell::new(Boolector::new()));
-            let state = Box::new(SymbolicState::new(solver));
-
-            let mut executor = Engine::new(ByteSize::mib(1), &program, &mut strategy, state);
-
-            executor.run();
+            create_and_run::<_, Boolector>(&program, &strategy, max_exection_depth, memory_size)
         }
         Backend::Z3 => {
-            let solver = Rc::new(RefCell::new(Z3::new()));
-            let state = Box::new(SymbolicState::new(solver));
-
-            let mut executor = Engine::new(ByteSize::mib(1), &program, &mut strategy, state);
-
-            executor.run();
+            create_and_run::<_, Z3>(&program, &strategy, max_exection_depth, memory_size)
         }
     }
+}
 
-    Ok(())
+fn create_and_run<E, S>(
+    program: &Program,
+    strategy: &E,
+    max_exection_depth: u64,
+    memory_size: ByteSize,
+) -> Result<()>
+where
+    E: ExplorationStrategy,
+    S: Solver + Default,
+{
+    let solver = Rc::new(S::default());
+    let state = Box::new(SymbolicState::new(solver));
+
+    Engine::new(memory_size, max_exection_depth, &program, strategy, state).run()
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -96,7 +100,9 @@ where
     pc: u64,
     regs: [Value; 32],
     memory: Vec<Value>,
-    strategy: &'a mut E,
+    strategy: &'a E,
+    execution_depth: u64,
+    max_exection_depth: u64,
     is_exited: bool,
 }
 
@@ -108,8 +114,9 @@ where
     // creates a machine state with a specific memory size
     pub fn new(
         memory_size: ByteSize,
+        max_exection_depth: u64,
         program: &Program,
-        strategy: &'a mut E,
+        strategy: &'a E,
         symbolic_state: Box<SymbolicState<S>>,
     ) -> Self {
         let mut regs = [Value::Concrete(0); 32];
@@ -118,30 +125,16 @@ where
         let sp = memory_size.as_u64() - 8;
         regs[Register::Sp as usize] = Value::Concrete(sp);
 
-        // TOOD: Init main function arguments
+        // TODO: Init main function arguments
         let argc = 0;
         memory[sp as usize / size_of::<u64>()] = Value::Concrete(argc);
 
-        let code_start = (program.entry_address / 8) as usize;
-        let data_start = code_start + (program.code_segment.len() / 8) as usize;
-        let end = data_start + program.data_segment.len() / 8;
+        load_segment(&mut memory, &program.code);
+        load_segment(&mut memory, &program.data);
 
-        program
-            .code_segment
-            .chunks(8)
-            .map(LittleEndian::read_u64)
-            .zip(code_start..data_start)
-            .for_each(|(x, i)| memory[i] = Value::Concrete(x));
+        let pc = program.code.address;
 
-        program
-            .data_segment
-            .chunks(8)
-            .map(LittleEndian::read_u64)
-            .zip(data_start..end)
-            .for_each(|(x, i)| memory[i] = Value::Concrete(x));
-
-        let pc = program.entry_address;
-        let program_break = (end as u64 + 1) * 8;
+        let program_break = program.data.address + program.data.content.len() as u64;
 
         debug!(
             "initializing new execution context with {} of main memory",
@@ -149,13 +142,13 @@ where
         );
         debug!(
             "code segment: start={:#x} length={}",
-            code_start * 8,
-            program.code_segment.len(),
+            program.code.address,
+            program.code.content.len(),
         );
         debug!(
             "data segment: start={:#x} length={}",
-            data_start * 8,
-            program.data_segment.len(),
+            program.data.address,
+            program.data.content.len(),
         );
         debug!(
             "init state: pc={:#x} brk={:#x}, argc={}",
@@ -169,21 +162,32 @@ where
             regs,
             memory,
             strategy,
+            execution_depth: 0,
+            max_exection_depth,
             is_exited: false,
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<()> {
         while !self.is_exited {
+            if self.execution_depth >= self.max_exection_depth {
+                trace!("maximum execution depth reached => exiting this context");
+
+                self.is_exited = true;
+
+                break;
+            }
+
+            self.execution_depth += 1;
+
             let word = self.fetch();
 
-            // TODO: handle case where decoding fails
-            let instr = self
-                .decode(word)
-                .expect("instructions have to be always decodable");
+            let instr = decode(word)?;
 
-            self.execute(instr);
+            self.execute(instr)?;
         }
+
+        Ok(())
     }
 
     fn handle_solver_result(&self, reason: &str, solver_result: SolverReturns) {
@@ -475,7 +479,7 @@ where
         false_branch: u64,
         lhs: SymbolId,
         rhs: SymbolId,
-    ) {
+    ) -> Result<()> {
         let memory_snapshot = self.memory.clone();
         let regs_snapshot = self.regs;
         let graph_snapshot = Box::new((*self.symbolic_state).clone());
@@ -498,7 +502,7 @@ where
         );
 
         self.pc = next_pc;
-        self.run();
+        self.run()?;
 
         self.is_exited = false;
 
@@ -522,9 +526,11 @@ where
         );
 
         self.pc = next_pc;
+
+        Ok(())
     }
 
-    fn execute_beq(&mut self, btype: BType) {
+    fn execute_beq(&mut self, btype: BType) -> Result<()> {
         let lhs = self.regs[btype.rs1() as usize];
         let rhs = self.regs[btype.rs2() as usize];
 
@@ -544,6 +550,8 @@ where
                     rhs,
                     self.pc
                 );
+
+                Ok(())
             }
             (Value::Symbolic(v1), Value::Concrete(v2)) => {
                 let v2 = self.symbolic_state.create_const(v2);
@@ -563,6 +571,8 @@ where
                 trace!("could not find input assignment => exeting this context");
 
                 self.is_exited = true;
+
+                Ok(())
             }
         }
     }
@@ -741,11 +751,7 @@ where
         }
     }
 
-    fn decode(&self, raw_instr: u32) -> Result<Instruction, riscv_decode::DecodingError> {
-        riscv_decode::decode(raw_instr)
-    }
-
-    fn execute(&mut self, instruction: Instruction) {
+    fn execute(&mut self, instruction: Instruction) -> Result<()> {
         match instruction {
             Instruction::Ecall(_) => self.execute_ecall(),
             Instruction::Lui(utype) => self.execute_lui(utype),
@@ -762,10 +768,23 @@ where
             Instruction::Sd(stype) => self.execute_sd(instruction, stype),
             Instruction::Jal(jtype) => self.execute_jal(jtype),
             Instruction::Jalr(itype) => self.execute_jalr(itype),
-            Instruction::Beq(btype) => self.execute_beq(btype),
-            i => unreachable!("can not handle this instruction {:?}", i),
+            Instruction::Beq(btype) => self.execute_beq(btype)?,
         }
+
+        Ok(())
     }
+}
+
+fn load_segment(memory: &mut Vec<Value>, segment: &ProgramSegment<u8>) {
+    let start = segment.address as usize / size_of::<u64>();
+    let end = start + segment.content.len() / size_of::<u64>();
+
+    segment
+        .content
+        .chunks(size_of::<u64>())
+        .map(LittleEndian::read_u64)
+        .zip(start..end)
+        .for_each(|(x, i)| memory[i] = Value::Concrete(x));
 }
 
 fn print_assignment(assignment: &HashMap<String, BitVector>) {
@@ -790,6 +809,5 @@ const fn instruction_to_str(i: Instruction) -> &'static str {
         Instruction::Divu(_) => "divu",
         Instruction::Remu(_) => "remu",
         Instruction::Ecall(_) => "ecall",
-        _ => "unknown",
     }
 }

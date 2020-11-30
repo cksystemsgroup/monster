@@ -6,8 +6,8 @@ use petgraph::{
     visit::{VisitMap, Visitable},
     Direction, Graph,
 };
-use riscv_decode::Instruction;
-use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
+use riscu::Instruction;
+use std::{collections::HashMap, fmt, rc::Rc};
 
 #[derive(Clone, Debug, Copy, Eq, Hash, PartialEq)]
 pub enum OperandSide {
@@ -114,7 +114,7 @@ where
 {
     data_flow: Graph<Node, OperandSide>,
     path_condition: Option<NodeIndex>,
-    solver: Rc<RefCell<S>>,
+    solver: Rc<S>,
 }
 
 impl<S> Clone for SymbolicState<S>
@@ -125,7 +125,7 @@ where
         Self {
             data_flow: self.data_flow.clone(),
             path_condition: self.path_condition,
-            solver: Rc::clone(&self.solver),
+            solver: self.solver.clone(),
         }
     }
 }
@@ -134,7 +134,7 @@ impl<'a, S> SymbolicState<S>
 where
     S: Solver,
 {
-    pub fn new(solver: Rc<RefCell<S>>) -> Self {
+    pub fn new(solver: Rc<S>) -> Self {
         Self {
             data_flow: Graph::new(),
             path_condition: None,
@@ -254,14 +254,24 @@ where
                     .detach();
 
                 if op.is_unary() {
-                    let x = operands.next(&self.data_flow).unwrap().1;
+                    let x = operands
+                        .next(&self.data_flow)
+                        .expect("every unary operator must have 1 operand")
+                        .1;
 
                     self.print_recursive(x, visit_map);
 
                     debug!("x{} := {}x{}", n.index(), op, x.index());
                 } else {
-                    let lhs = operands.next(&self.data_flow).unwrap().1;
-                    let rhs = operands.next(&self.data_flow).unwrap().1;
+                    let lhs = operands
+                        .next(&self.data_flow)
+                        .expect("every binary operator must have an lhs operand")
+                        .1;
+
+                    let rhs = operands
+                        .next(&self.data_flow)
+                        .expect("every binary operator must have an rhs operand")
+                        .1;
 
                     self.print_recursive(lhs, visit_map);
                     self.print_recursive(rhs, visit_map);
@@ -296,7 +306,7 @@ where
             debug!("assert x{} is 1", root.index());
         }
 
-        let result = self.solver.borrow_mut().solve(&self.data_flow, root);
+        let result = self.solver.solve(&self.data_flow, root);
 
         cleanup_edges.iter().for_each(|e| {
             self.data_flow.remove_edge(*e);

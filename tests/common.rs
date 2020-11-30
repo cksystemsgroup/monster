@@ -13,6 +13,13 @@ pub fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
+// TODO: use cksystemsteaching/selfie image, once the #arch branch get's
+// merged into the master branch in the selfie repository.
+// Until then, we can use this image, which is a build from the #arch branch.
+// This version of Selfie creates seperate segments for code and data,
+// which is needed by the "riscu" library to work.
+const SELFIE_DOCKER_IMAGE: &str = "christianmoesl/selfie";
+
 pub fn compile<P>(source_file: P, destination_file: P) -> Result<PathBuf, &'static str>
 where
     P: AsRef<Path>,
@@ -37,7 +44,7 @@ where
             "{}:/opt/monster_dst",
             dst_directory.to_str().unwrap()
         ))
-        .arg("cksystemsteaching/selfie")
+        .arg(SELFIE_DOCKER_IMAGE)
         .arg("/opt/selfie/selfie")
         .arg("-c")
         .arg(format!(
@@ -95,7 +102,9 @@ where
     result
 }
 
-pub fn compile_all_riscu() -> (
+pub fn compile_riscu(
+    filter: Option<&'static [&str]>,
+) -> (
     Arc<TempDir>,
     impl ParallelIterator<Item = (PathBuf, PathBuf)>,
 ) {
@@ -106,9 +115,13 @@ pub fn compile_all_riscu() -> (
         .unwrap()
         .par_bridge()
         .map(|dir_entry| dir_entry.unwrap().path())
-        .filter(|path| {
+        .filter(move |path| {
             if let Some(extension) = path.extension() {
-                extension == "c"
+                if let Some(names) = filter {
+                    names.iter().any(|name| path.ends_with(name))
+                } else {
+                    extension == "c"
+                }
             } else {
                 false
             }
@@ -119,7 +132,7 @@ pub fn compile_all_riscu() -> (
                 .join(source_file.with_extension("o").file_name().unwrap());
 
             let result_path = time(
-                format!("compile: {}", source_file.to_str().unwrap()).as_str(),
+                format!("compile: {}", source_file.display()).as_str(),
                 || compile(source_file.clone(), dst_file_path.clone()).unwrap(),
             );
 

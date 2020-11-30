@@ -32,7 +32,7 @@ impl SolverReturns {
 
 pub type Assignment<T> = Vec<T>;
 
-pub trait Solver {
+pub trait Solver: Default {
     fn name() -> &'static str;
 
     fn solve(&mut self, formula: &Formula, root: SymbolId) -> SolverReturns {
@@ -44,6 +44,7 @@ pub trait Solver {
     }
 
     fn solve_impl(&mut self, formula: &Formula, root: SymbolId) -> SolverReturns;
+
 }
 
 pub struct MonsterSolver {}
@@ -88,6 +89,11 @@ fn is_invertable(
     t: BitVector,
     d: OperandSide,
 ) -> bool {
+    fn compute_modinverse(s: BitVector) -> BitVector {
+        s.modinverse()
+            .expect("a modular inverse value has to exist at this point")
+    }
+
     match op {
         BVOperator::Add => x.mcb(t - s),
         BVOperator::Sub => match d {
@@ -97,11 +103,11 @@ fn is_invertable(
         BVOperator::Mul => {
             fn y(s: BitVector, t: BitVector) -> BitVector {
                 let c = s.ctz();
-                (t >> c) * (s >> c).modinverse().unwrap()
+                (t >> c) * compute_modinverse(s >> c)
             }
 
             ((-s | s) & t == t)
-                && (s == BitVector(0) || (!s.odd() || x.mcb(t * s.modinverse().unwrap())))
+                && (s == BitVector(0) || (!s.odd() || x.mcb(t * compute_modinverse(s))))
                 && (s.odd() || (x << s.ctz()).mcb(y(s, t) << s.ctz()))
         }
         BVOperator::Divu => {
@@ -299,7 +305,9 @@ fn compute_inverse_value(
         BVOperator::Mul => {
             let y = s >> s.ctz();
 
-            let y_inv = y.modinverse().unwrap();
+            let y_inv = y
+                .modinverse()
+                .expect("a modular inverse has to exist iff operator is invertable");
 
             let result = (t >> s.ctz()) * y_inv;
 
@@ -517,7 +525,7 @@ fn is_essential(
 fn get_operand(f: &Formula, n: SymbolId) -> SymbolId {
     f.edges_directed(n, Direction::Incoming)
         .next()
-        .unwrap()
+        .expect("every unary operator must have an operand")
         .source()
 }
 
@@ -761,7 +769,7 @@ mod tests {
 
         let root = add_equals_constrain(&mut formula, input_idx, OperandSide::Lhs, 10);
 
-        let mut solver = MonsterSolver::default();
+        let solver = MonsterSolver::default();
         let result = solver.solve(&formula, root);
 
         assert!(
@@ -790,7 +798,7 @@ mod tests {
 
         let root = add_equals_constrain(&mut formula, instr_idx, OperandSide::Lhs, 10);
 
-        let mut solver = MonsterSolver::default();
+        let solver = MonsterSolver::default();
         let result = solver.solve(&formula, root);
 
         assert!(result.is_valid_result(), "has result for trivial add op");

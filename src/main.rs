@@ -1,85 +1,88 @@
-use env_logger::{Env, TimestampPrecision};
-use log::error;
-use std::{fmt::Display, path::Path};
-
 mod cli;
 
+use anyhow::{Context, Result};
+use bytesize::ByteSize;
+use cli::expect_arg;
+use env_logger::{Env, TimestampPrecision};
 use monster::{
     cfg::{build_cfg_from_file, write_to_file},
-    disassemble::disassemble_riscu,
+    disassemble::disassemble,
     engine,
     exploration_strategy::ShortestPathStrategy,
 };
+use std::{env, io::Write, path::Path};
 
-fn handle_error<R, E, F>(f: F) -> R
-where
-    E: Display,
-    F: FnOnce() -> Result<R, E>,
-{
-    match f() {
-        Err(e) => {
-            error!("{}", e);
-            std::process::exit(1);
-        }
-        Ok(x) => x,
-    }
-}
-
-fn main() {
+fn main() -> Result<()> {
     let matches = cli::args().get_matches();
 
-    let log_level = matches
-        .value_of("verbose")
-        .expect("log level has to be set in CLI at all times");
+    // process global flags
+    let log_level = expect_arg(&matches, "verbose");
 
-    let env = Env::new()
-        .filter_or("MONSTER_LOG", log_level)
-        .write_style_or("MONSTER_LOG_STYLE", "always");
+    init_logger(log_level)?;
 
-    env_logger::Builder::from_env(env)
-        .format_timestamp(Some(TimestampPrecision::Millis))
-        .init();
-
+    // process subcommands
     match matches.subcommand() {
-        Some(("disassemble", disassemble_args)) => handle_error(|| {
-            let input = Path::new(disassemble_args.value_of("input-file").unwrap());
-            disassemble_riscu(Path::new(input))
-        }),
-        Some(("cfg", cfg_args)) => {
-            handle_error(|| -> Result<(), String> {
-                let input = Path::new(cfg_args.value_of("input-file").unwrap());
-                let output = Path::new(cfg_args.value_of("output-file").unwrap());
-                let distances = cfg_args.is_present("distances");
+        Some(("disassemble", args)) => {
+            let input = Path::new(expect_arg(&args, "input-file"));
 
-                let ((cfg, _), program) = build_cfg_from_file(Path::new(input))?;
+            disassemble(Path::new(input))
+        }
+        Some(("cfg", args)) => {
+            let input = Path::new(expect_arg(&args, "input-file"));
+            let output = Path::new(expect_arg(&args, "output-file"));
+            let distances = args.is_present("distances");
 
-                if distances {
-                    ShortestPathStrategy::new(&cfg, program.entry_address)
-                        .write_cfg_with_distances_to_file(output)
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    write_to_file(&cfg, output).map_err(|e| e.to_string())?;
-                }
+            let ((cfg, _), program) = build_cfg_from_file(Path::new(input))?;
 
-                Ok(())
-            });
+            if distances {
+                ShortestPathStrategy::new(&cfg, program.code.address)
+                    .write_cfg_with_distances_to_file(output)
+            } else {
+                write_to_file(&cfg, output)
+            }
         }
         Some(("execute", args)) => {
-            handle_error(|| -> Result<(), String> {
-                let input = Path::new(args.value_of("input-file").unwrap());
-                let solver = args.value_of("solver").unwrap();
+            let input = Path::new(expect_arg(&args, "input-file"));
+            let solver = expect_arg(&args, "solver");
 
-                engine::execute(
-                    input,
-                    match solver {
-                        "monster" => engine::Backend::Monster,
-                        "boolector" => engine::Backend::Boolector,
-                        "z3" => engine::Backend::Z3,
-                        _ => unreachable!(),
-                    },
-                )
-            });
+            let depth = args
+                .value_of_t::<u64>("max-execution-depth")
+                .expect("value is validated already");
+
+            let megabytes = args
+                .value_of_t::<u64>("memory")
+                .expect("value is validated already");
+
+            engine::execute(
+                input,
+                match solver {
+                    "monster" => engine::Backend::Monster,
+                    "boolector" => engine::Backend::Boolector,
+                    "z3" => engine::Backend::Z3,
+                    _ => unreachable!(),
+                },
+                depth,
+                ByteSize::mb(megabytes),
+            )
         }
         _ => unreachable!(),
     }
+}
+
+fn init_logger(cli_log_level: &str) -> Result<()> {
+    let env = Env::new()
+        .filter_or("MONSTER_LOG", cli_log_level)
+        .write_style_or("MONSTER_LOG_STYLE", "always");
+
+    let mut builder = env_logger::Builder::from_env(env);
+
+    builder.format_timestamp(Some(TimestampPrecision::Millis));
+
+    let level = env::var("MONSTER_LOG").unwrap_or_else(|_| cli_log_level.to_owned());
+
+    if level == "info" {
+        builder.format(|buf, record| writeln!(buf, "{}", record.args()));
+    }
+
+    builder.try_init().context("Failed to initialize logger")
 }
