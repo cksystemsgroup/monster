@@ -44,7 +44,6 @@ pub trait Solver: Default {
     }
 
     fn solve_impl(&mut self, formula: &Formula, root: SymbolId) -> SolverReturns;
-
 }
 
 pub struct MonsterSolver {}
@@ -769,7 +768,7 @@ mod tests {
 
         let root = add_equals_constrain(&mut formula, input_idx, OperandSide::Lhs, 10);
 
-        let solver = MonsterSolver::default();
+        let mut solver = MonsterSolver::default();
         let result = solver.solve(&formula, root);
 
         assert!(
@@ -798,7 +797,7 @@ mod tests {
 
         let root = add_equals_constrain(&mut formula, instr_idx, OperandSide::Lhs, 10);
 
-        let solver = MonsterSolver::default();
+        let mut solver = MonsterSolver::default();
         let result = solver.solve(&formula, root);
 
         assert!(result.is_valid_result(), "has result for trivial add op");

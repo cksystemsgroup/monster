@@ -7,6 +7,7 @@ use petgraph::{
     Direction, Graph,
 };
 use riscu::Instruction;
+use std::cell::RefCell;
 use std::{collections::HashMap, fmt, rc::Rc};
 
 #[derive(Clone, Debug, Copy, Eq, Hash, PartialEq)]
@@ -114,7 +115,7 @@ where
 {
     data_flow: Graph<Node, OperandSide>,
     path_condition: Option<NodeIndex>,
-    solver: Rc<S>,
+    solver: Rc<RefCell<S>>,
 }
 
 impl<S> Clone for SymbolicState<S>
@@ -134,7 +135,7 @@ impl<'a, S> SymbolicState<S>
 where
     S: Solver,
 {
-    pub fn new(solver: Rc<S>) -> Self {
+    pub fn new(solver: Rc<RefCell<S>>) -> Self {
         Self {
             data_flow: Graph::new(),
             path_condition: None,
@@ -306,7 +307,7 @@ where
             debug!("assert x{} is 1", root.index());
         }
 
-        let result = self.solver.solve(&self.data_flow, root);
+        let result = self.solver.borrow_mut().solve(&self.data_flow, root);
 
         cleanup_edges.iter().for_each(|e| {
             self.data_flow.remove_edge(*e);

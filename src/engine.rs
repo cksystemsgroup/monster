@@ -13,7 +13,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use bytesize::ByteSize;
 use log::{debug, info, trace};
 use riscu::{decode, types::*, Instruction, Program, ProgramSegment, Register};
-use std::{collections::HashMap, fmt, mem::size_of, path::Path, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt, mem::size_of, path::Path, rc::Rc};
 
 #[allow(dead_code)]
 pub enum SyscallId {
@@ -67,7 +67,7 @@ where
     E: ExplorationStrategy,
     S: Solver + Default,
 {
-    let solver = Rc::new(S::default());
+    let solver = Rc::new(RefCell::new(S::default()));
     let state = Box::new(SymbolicState::new(solver));
 
     Engine::new(memory_size, max_exection_depth, &program, strategy, state).run()
