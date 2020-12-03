@@ -1,4 +1,5 @@
 use crate::bitvec::BitVector;
+use crate::engine::EngineError;
 use crate::solver::{Assignment, Solver};
 use crate::symbolic_state::{
     get_operands, BVOperator, Formula,
@@ -31,7 +32,11 @@ impl Solver for Boolector {
         "Boolector"
     }
 
-    fn solve_impl(&self, graph: &Formula, root: SymbolId) -> Option<Assignment<BitVector>> {
+    fn solve_impl(
+        &self,
+        graph: &Formula,
+        root: SymbolId,
+    ) -> Result<Option<Assignment<BitVector>>, EngineError> {
         let solver = Rc::new(Btor::new());
         solver.set_opt(BtorOption::ModelGen(ModelGen::All));
         solver.set_opt(BtorOption::Incremental(true));
@@ -39,26 +44,28 @@ impl Solver for Boolector {
 
         let mut bvs = HashMap::new();
         let bv = traverse(graph, root, &solver, &mut bvs);
-        bv.slice(0, 0).assert();
+        bv.assert();
 
-        if let SolverResult::Sat = solver.sat() {
-            let assignments = graph
-                .node_indices()
-                //.filter(|i| matches!(graph[*i], Input(_)))
-                .map(|i| {
-                    let bv = bvs.get(&i).expect("every input must be part of bvs");
+        match solver.sat() {
+            SolverResult::Sat => {
+                Ok(Some(
+                    graph
+                        .node_indices()
+                        //.filter(|i| matches!(graph[*i], Input(_)))
+                        .map(|i| {
+                            let bv = bvs.get(&i).expect("every input must be part of bvs");
 
-                    BitVector(
-                        bv.get_a_solution()
-                            .as_u64()
-                            .expect("BV always fits in 64 bits for our machine"),
-                    )
-                })
-                .collect();
-
-            Some(assignments)
-        } else {
-            None
+                            BitVector(
+                                bv.get_a_solution()
+                                    .as_u64()
+                                    .expect("BV always fits in 64 bits for our machine"),
+                            )
+                        })
+                        .collect(),
+                ))
+            }
+            SolverResult::Unsat => Ok(None),
+            SolverResult::Unknown => Ok(None),
         }
     }
 }
@@ -71,9 +78,9 @@ fn traverse<'a>(
 ) -> BV<Rc<Btor>> {
     let bv =
         match &graph[node] {
-            Operator(op) => {
-                match get_operands(graph, node) {
-                    (lhs, Some(rhs)) => match op {
+            Operator(op) => match get_operands(graph, node) {
+                (lhs, Some(rhs)) => {
+                    match op {
                         BVOperator::Add => traverse(graph, lhs, solver, bvs)
                             .add(&traverse(graph, rhs, solver, bvs)),
                         BVOperator::Sub => traverse(graph, lhs, solver, bvs)
@@ -81,25 +88,27 @@ fn traverse<'a>(
                         BVOperator::Mul => traverse(graph, lhs, solver, bvs)
                             .mul(&traverse(graph, rhs, solver, bvs)),
                         BVOperator::Equals => traverse(graph, lhs, solver, bvs)
-                            ._eq(&traverse(graph, rhs, solver, bvs))
-                            .uext(63),
+                            ._eq(&traverse(graph, rhs, solver, bvs)),
                         BVOperator::BitwiseAnd => traverse(graph, lhs, solver, bvs)
                             .and(&traverse(graph, rhs, solver, bvs)),
                         BVOperator::Divu => traverse(graph, lhs, solver, bvs)
                             .udiv(&traverse(graph, rhs, solver, bvs)),
                         BVOperator::Sltu => traverse(graph, lhs, solver, bvs)
-                            .ult(&traverse(graph, rhs, solver, bvs))
-                            .uext(63),
+                            .slt(&traverse(graph, rhs, solver, bvs))
+                            .cond_bv(
+                                &BV::from_u64(solver.clone(), 1, 64),
+                                &BV::from_u64(solver.clone(), 0, 64),
+                            ),
                         i => unreachable!("binary operator: {:?}", i),
-                    },
-                    (lhs, None) => match op {
-                        BVOperator::Not => traverse(graph, lhs, solver, bvs)
-                            ._eq(&BV::from_u64(solver.clone(), 0, 64))
-                            .uext(63),
-                        i => unreachable!("unary operator: {:?}", i),
-                    },
+                    }
                 }
-            }
+                (lhs, None) => match op {
+                    BVOperator::Not => {
+                        traverse(graph, lhs, solver, bvs)._eq(&BV::from_u64(solver.clone(), 0, 1))
+                    }
+                    i => unreachable!("unary operator: {:?}", i),
+                },
+            },
             Input(name) => {
                 if let Some(value) = bvs.get(&node) {
                     value.clone()

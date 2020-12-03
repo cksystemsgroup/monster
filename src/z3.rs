@@ -1,4 +1,5 @@
 use crate::bitvec::BitVector;
+use crate::engine::EngineError;
 use crate::solver::{Assignment, Solver};
 use crate::symbolic_state::{
     get_operands, BVOperator, Formula,
@@ -30,7 +31,11 @@ impl Solver for Z3 {
         "Z3"
     }
 
-    fn solve_impl(&self, graph: &Formula, root: SymbolId) -> Option<Assignment<BitVector>> {
+    fn solve_impl(
+        &self,
+        graph: &Formula,
+        root: SymbolId,
+    ) -> Result<Option<Assignment<BitVector>>, EngineError> {
         let config = Config::default();
         let ctx = Context::new(&config);
 
@@ -48,14 +53,14 @@ impl Solver for Z3 {
                     .get_model()
                     .expect("has an result after calling check()");
 
-                Some(
+                Ok(Some(
                     graph
                         .node_indices()
                         .map(|i| bv_for_node_idx(i, translation, &model))
                         .collect(),
-                )
+                ))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 }
@@ -152,7 +157,7 @@ impl<'a, 'ctx> Z3Translator<'a, 'ctx> {
                     BVOperator::BitwiseAnd => {
                         traverse_binary!(self, lhs, bvand, rhs)
                     }
-                    BVOperator::Sltu => traverse_binary!(self, lhs, bvult, rhs)
+                    BVOperator::Sltu => traverse_binary!(self, lhs, bvslt, rhs)
                         .as_bool()
                         .expect("has to be bool after bvslt")
                         .ite(&self.one, &self.zero),
