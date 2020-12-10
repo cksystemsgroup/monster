@@ -41,6 +41,9 @@ impl BVOperator {
     pub fn is_unary(&self) -> bool {
         *self == BVOperator::Not
     }
+    pub fn is_binary(&self) -> bool {
+        !self.is_unary()
+    }
 }
 
 impl fmt::Display for BVOperator {
@@ -160,10 +163,26 @@ where
     ) -> SymbolId {
         let op = instruction_to_bv_operator(instruction);
 
-        self.create_operator(op, lhs, rhs)
+        let root = self.create_operator(op, lhs, rhs);
+
+        // constrain divisor to be not zero,
+        // as division by zero is allowed in SMT bit-vector formulas
+        if matches!(op, BVOperator::Divu)
+            && matches!(self.data_flow[rhs], Node::Operator(_) | Node::Input(_))
+        {
+            let zero = self.create_const(0);
+            let negated_condition = self.create_operator(BVOperator::Equals, rhs, zero);
+            let condition = self.create_unary_operator(BVOperator::Not, negated_condition);
+
+            self.add_path_condition(condition);
+        }
+
+        root
     }
 
     pub fn create_operator(&mut self, op: BVOperator, lhs: SymbolId, rhs: SymbolId) -> SymbolId {
+        assert!(op.is_binary(), "has to be a binary operator");
+
         let n = Node::Operator(op);
         let n_idx = self.data_flow.add_node(n);
 
@@ -187,6 +206,16 @@ where
         n_idx
     }
 
+    fn create_unary_operator(&mut self, op: BVOperator, v: SymbolId) -> SymbolId {
+        assert!(op.is_unary(), "has to be a unary operator");
+
+        let op_id = self.data_flow.add_node(Node::Operator(op));
+
+        self.data_flow.add_edge(v, op_id, OperandSide::Lhs);
+
+        op_id
+    }
+
     pub fn create_input(&mut self, name: &str) -> SymbolId {
         let node = Node::Input(String::from(name));
 
@@ -201,18 +230,20 @@ where
         let mut pc_idx = self.create_operator(BVOperator::Equals, lhs, rhs);
 
         if !decision {
-            let not_idx = self.data_flow.add_node(Node::Operator(BVOperator::Not));
-
-            self.data_flow.add_edge(pc_idx, not_idx, OperandSide::Lhs);
-
-            pc_idx = not_idx;
+            pc_idx = self.create_unary_operator(BVOperator::Not, pc_idx);
         }
 
-        if let Some(old_pc_idx) = self.path_condition {
-            pc_idx = self.create_operator(BVOperator::BitwiseAnd, old_pc_idx, pc_idx)
-        }
+        self.add_path_condition(pc_idx)
+    }
 
-        self.path_condition = Some(pc_idx);
+    fn add_path_condition(&mut self, condition: SymbolId) {
+        let new_condition = if let Some(old_condition) = self.path_condition {
+            self.create_operator(BVOperator::BitwiseAnd, old_condition, condition)
+        } else {
+            condition
+        };
+
+        self.path_condition = Some(new_condition);
     }
 
     pub fn execute_query(&mut self, query: Query) -> Result<Option<Witness>, SolverError> {
