@@ -462,6 +462,11 @@ where
         let high_shift_factor =
             2_u64.pow((size_of::<u64>() as u32 - n_lower_bytes) * bits_in_a_byte);
 
+        assert!(
+            low_shift_factor != 0 && high_shift_factor != 0,
+            "no bytes to shift"
+        );
+
         let old_idx = match old {
             Value::Concrete(c) => {
                 let old_c = c / low_shift_factor * low_shift_factor;
