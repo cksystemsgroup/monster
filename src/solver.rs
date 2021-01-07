@@ -214,7 +214,6 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
 
             let arbitrary_bits = BitVector(random::<u64>()) & arbitrary_bit_mask;
 
-            //TODO: Ask Christian if this is correct!
             result | arbitrary_bits
         }
         BVOperator::Sltu => {
@@ -801,7 +800,6 @@ mod tests {
     }
 
     #[test]
-    //TODO: what exactly is -s if s is a Bitvector
     fn check_invertability_condition_for_mul() {
         let side = OperandSide::Lhs;
 
