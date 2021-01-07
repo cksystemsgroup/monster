@@ -97,10 +97,16 @@ fn is_invertable(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> 
         BVOperator::Sltu => {
             // (x<s) = t
             if d == OperandSide::Lhs {
-                !(s == BitVector(0))
+                if t == BitVector(1) {
+                    !(s == BitVector(0))
+                } else {
+                    true
+                }
             // (s<x) = t
-            } else {
+            } else if t == BitVector(1) {
                 !(s == BitVector::ones())
+            } else {
+                true
             }
         }
         BVOperator::Not => true,
@@ -376,6 +382,20 @@ fn get_operand(f: &Formula, n: SymbolId) -> SymbolId {
         .source()
 }
 
+fn update_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: SymbolId, v: BitVector) {
+    ab[n.index()] = v;
+
+    assert!(
+        matches!(f[n], Node::Input(_)),
+        "only inputs can be assigned"
+    );
+
+    trace!("update: x{} <- {:#x}", n.index(), v.0);
+
+    f.neighbors_directed(n, Direction::Outgoing)
+        .for_each(|n| propagate_assignment(f, ab, n));
+}
+
 fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: SymbolId) {
     fn update_binary<Op>(f: &Formula, ab: &mut Assignment<BitVector>, n: SymbolId, s: &str, op: Op)
     where
@@ -466,7 +486,7 @@ fn propagate_assignment(f: &Formula, ab: &mut Assignment<BitVector>, n: SymbolId
 fn sat(
     formula: &Formula,
     root: SymbolId,
-    ab: Assignment<BitVector>,
+    mut ab: Assignment<BitVector>,
     timeout_time: Duration,
 ) -> Result<Option<Assignment<BitVector>>, SolverError> {
     let mut iterations = 0;
@@ -540,6 +560,8 @@ fn sat(
             t = v;
             n = nx;
         }
+
+        update_assignment(formula, &mut ab, n, t);
     }
 
     Ok(Some(ab))
@@ -631,7 +653,6 @@ mod tests {
 
     fn test_invertability(
         op: BVOperator,
-        x: &'static str,
         s: u64,
         t: u64,
         d: OperandSide,
@@ -646,8 +667,7 @@ mod tests {
                 assert_eq!(
                     is_invertable(op, s, t, d),
                     result,
-                    "{:?} {:?} {:?} == {:?}   {}",
-                    x,
+                    "x {:?} {:?} == {:?}   {}",
                     op,
                     s,
                     t,
@@ -658,10 +678,9 @@ mod tests {
                 assert_eq!(
                     is_invertable(op, s, t, d),
                     result,
-                    "{:?} {:?} {:?} == {:?}   {}",
+                    "{:?} {:?} x == {:?}   {}",
                     s,
                     op,
-                    x,
                     t,
                     msg
                 );
@@ -769,35 +788,27 @@ mod tests {
     #[test]
     fn check_invertability_condition_for_divu() {
         // x doesnt matter
-        test_invertability(DIVU, "1", 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
-        test_invertability(DIVU, "1", 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
+        test_invertability(DIVU, 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
+        test_invertability(DIVU, 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
 
-        test_invertability(DIVU, "1", 3, 2, OperandSide::Lhs, true, "x / 3 = 2");
-        test_invertability(DIVU, "1", 6, 2, OperandSide::Rhs, true, "6 / x = 2");
+        test_invertability(DIVU, 3, 2, OperandSide::Lhs, true, "x / 3 = 2");
+        test_invertability(DIVU, 6, 2, OperandSide::Rhs, true, "6 / x = 2");
 
-        test_invertability(DIVU, "1", 0, 2, OperandSide::Lhs, false, "x / 0 = 2");
-        test_invertability(DIVU, "1", 0, 2, OperandSide::Rhs, false, "0 / x = 2");
+        test_invertability(DIVU, 0, 2, OperandSide::Lhs, false, "x / 0 = 2");
+        test_invertability(DIVU, 0, 2, OperandSide::Rhs, false, "0 / x = 2");
 
-        test_invertability(DIVU, "1", 5, 6, OperandSide::Rhs, false, "5 / x = 6");
+        test_invertability(DIVU, 5, 6, OperandSide::Rhs, false, "5 / x = 6");
     }
 
     #[test]
+    //TODO: what exactly is -s if s is a Bitvector
     fn check_invertability_condition_for_mul() {
         let side = OperandSide::Lhs;
 
-        test_invertability(MUL, "1", 0b1, 0b1, side, true, "trivial multiplication");
+        test_invertability(MUL, 0b1, 0b1, side, true, "trivial multiplication");
+        test_invertability(MUL, 0b10, 0b1, side, false, "operand bigger than result");
         test_invertability(
             MUL,
-            "1",
-            0b10,
-            0b1,
-            side,
-            false,
-            "operand bigger than result",
-        );
-        test_invertability(
-            MUL,
-            "0*",
             0b10,
             0b10,
             side,
@@ -806,16 +817,14 @@ mod tests {
         );
         test_invertability(
             MUL,
-            "*0",
             0b10,
             0b10,
             side,
-            false,
+            true,
             "operand with undetermined bits and no inverse value",
         );
         test_invertability(
             MUL,
-            "***",
             0b100,
             0b100,
             side,
@@ -824,7 +833,6 @@ mod tests {
         );
         test_invertability(
             MUL,
-            "**0",
             0b10,
             0b1100,
             side,
@@ -851,43 +859,37 @@ mod tests {
     fn check_invertability_condition_for_sltu() {
         let mut side = OperandSide::Lhs;
 
-        test_invertability(SLTU, "1", 2, 1, side, true, "trivial sltu v1");
-        test_invertability(SLTU, "10", 1, 0, side, true, "trivial sltu v2");
-        test_invertability(SLTU, "1", 1, 0, side, true, "trivial sltu v3");
-
-        test_invertability(SLTU, "1", 2, 0, side, false, "trivial sltu v4");
-        test_invertability(SLTU, "10", 1, 1, side, false, "trivial sltu v5");
-        test_invertability(SLTU, "1", 1, 1, side, false, "trivial sltu v6");
-
-        side = OperandSide::Rhs;
-
-        test_invertability(SLTU, "1", 2, 1, side, false, "trivial sltu v7");
-        test_invertability(SLTU, "10", 1, 0, side, false, "trivial sltu v8");
-        test_invertability(SLTU, "1", 1, 0, side, true, "trivial sltu v9");
-
-        test_invertability(SLTU, "1", 2, 0, side, true, "trivial sltu v10");
-        test_invertability(SLTU, "10", 1, 1, side, true, "trivial sltu v11");
-        test_invertability(SLTU, "1", 1, 1, side, false, "trivial sltu v12");
-
-        side = OperandSide::Lhs;
-
-        test_invertability(SLTU, "*", 2, 1, side, true, "nontrivial sltu v1");
-        test_invertability(SLTU, "**", 1, 0, side, true, "nontrivial sltu v2");
-        test_invertability(SLTU, "1*", 1, 0, side, true, "nontrivial sltu v3");
-
-        test_invertability(SLTU, "*", 2, 0, side, false, "nontrivial sltu v4");
-        test_invertability(SLTU, "**", 1, 1, side, true, "nontrivial sltu v5");
-        test_invertability(SLTU, "1*", 1, 1, side, false, "nontrivial sltu v6");
+        test_invertability(SLTU, 0, 1, side, false, "x < 0 == 1 FALSE");
+        test_invertability(SLTU, 1, 1, side, true, "x < 1 == 1 TRUE");
+        test_invertability(
+            SLTU,
+            u64::max_value(),
+            0,
+            side,
+            true,
+            "x < max_value == 0 TRUE",
+        );
 
         side = OperandSide::Rhs;
 
-        test_invertability(SLTU, "*", 2, 1, side, false, "nontrivial sltu v7");
-        test_invertability(SLTU, "**", 1, 0, side, true, "nontrivial sltu v8");
-        test_invertability(SLTU, "1*", 1, 0, side, false, "nontrivial sltu v9");
-
-        test_invertability(SLTU, "*", 2, 0, side, true, "nontrivial sltu v10");
-        test_invertability(SLTU, "**", 1, 1, side, true, "nontrivial sltu v11");
-        test_invertability(SLTU, "1*", 1, 1, side, true, "nontrivial sltu v12");
+        test_invertability(SLTU, 0, 1, side, true, "0 < x == 1 TRUE");
+        test_invertability(SLTU, 0, 0, side, true, "0 < x == 0 TRUE");
+        test_invertability(
+            SLTU,
+            u64::max_value(),
+            1,
+            side,
+            false,
+            "max_value < x == 1 FALSE",
+        );
+        test_invertability(
+            SLTU,
+            u64::max_value(),
+            0,
+            side,
+            true,
+            "max_value < x == 0 TRUE",
+        );
     }
 
     #[test]
@@ -918,15 +920,15 @@ mod tests {
         }
 
         // test only for values which are actually invertable
-        test_inverse_value_computation(SLTU, 2, 1, side, f);
-        test_inverse_value_computation(SLTU, 1, 0, side, f);
-        test_inverse_value_computation(SLTU, 2, 1, side, f);
+        test_inverse_value_computation(SLTU, u64::max_value(), 0, side, f);
+        test_inverse_value_computation(SLTU, 0, 0, side, f);
+        test_inverse_value_computation(SLTU, 1, 1, side, f);
 
         side = OperandSide::Rhs;
 
-        test_inverse_value_computation(SLTU, 2, 0, side, f);
+        test_inverse_value_computation(SLTU, 0, 0, side, f);
+        test_inverse_value_computation(SLTU, u64::max_value() - 1, 1, side, f);
         test_inverse_value_computation(SLTU, 1, 1, side, f);
-        test_inverse_value_computation(SLTU, 6, 1, side, f);
     }
 
     #[test]
@@ -954,7 +956,6 @@ mod tests {
         test_consistent_value_computation(MUL, 0b100, side, f);
     }
 
-    //TODO
     #[test]
     fn compute_consistent_values_for_sltu() {
         let mut side = OperandSide::Lhs;
@@ -974,7 +975,6 @@ mod tests {
         side = OperandSide::Rhs;
 
         // test only for values which actually have a consistent value
-        test_consistent_value_computation(SLTU, 0, side, f);
         test_consistent_value_computation(SLTU, 0, side, f);
         test_consistent_value_computation(SLTU, 1, side, f);
     }
