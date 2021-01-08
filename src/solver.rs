@@ -986,8 +986,8 @@ mod tests {
         test_inverse_value_computation(SLTU, 1, 1, side, f);
     }
 
-    #[test]
-    fn compute_consistent_values_for_divu() {
+    //#[test]
+    //fn compute_consistent_values_for_divu() {
         // fn f(l: BitVector, r: BitVector) -> BitVector {
         //     l / 
         // }
@@ -995,7 +995,7 @@ mod tests {
         // TODO, how to test this? @Moesl
         // test_consistent_value_computation(DIVU, "110", 3, OperandSide::Lhs, f);
         // test_consistent_value_computation(DIVU, "11", 6, OperandSide::Rhs, f);
-    }
+    //}
 
     #[test]
     fn compute_consistent_values_for_mul() {
