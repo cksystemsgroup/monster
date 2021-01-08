@@ -988,13 +988,13 @@ mod tests {
 
     //#[test]
     //fn compute_consistent_values_for_divu() {
-        // fn f(l: BitVector, r: BitVector) -> BitVector {
-        //     l / 
-        // }
+    // fn f(l: BitVector, r: BitVector) -> BitVector {
+    //     l /
+    // }
 
-        // TODO, how to test this? @Moesl
-        // test_consistent_value_computation(DIVU, "110", 3, OperandSide::Lhs, f);
-        // test_consistent_value_computation(DIVU, "11", 6, OperandSide::Rhs, f);
+    // TODO, how to test this? @Moesl
+    // test_consistent_value_computation(DIVU, "110", 3, OperandSide::Lhs, f);
+    // test_consistent_value_computation(DIVU, "11", 6, OperandSide::Rhs, f);
     //}
 
     #[test]
