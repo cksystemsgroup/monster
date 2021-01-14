@@ -843,7 +843,6 @@ mod tests {
 
     #[test]
     fn check_invertability_condition_for_divu() {
-        // x doesnt matter
         test_invertability(DIVU, 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
         test_invertability(DIVU, 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
 
@@ -985,17 +984,6 @@ mod tests {
         test_inverse_value_computation(SLTU, u64::max_value() - 1, 1, side, f);
         test_inverse_value_computation(SLTU, 1, 1, side, f);
     }
-
-    //#[test]
-    //fn compute_consistent_values_for_divu() {
-    // fn f(l: BitVector, r: BitVector) -> BitVector {
-    //     l /
-    // }
-
-    // TODO, how to test this? @Moesl
-    // test_consistent_value_computation(DIVU, "110", 3, OperandSide::Lhs, f);
-    // test_consistent_value_computation(DIVU, "11", 6, OperandSide::Rhs, f);
-    //}
 
     #[test]
     fn compute_consistent_values_for_mul() {
