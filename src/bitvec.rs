@@ -1,5 +1,5 @@
 use std::fmt;
-use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Shl, Shr, Sub};
+use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Rem, Shl, Shr, Sub};
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq, PartialOrd)]
 pub struct BitVector(pub u64);
@@ -78,6 +78,14 @@ impl Div<BitVector> for BitVector {
         } else {
             Self(self.0.wrapping_div(other.0))
         }
+    }
+}
+
+impl Rem<BitVector> for BitVector {
+    type Output = BitVector;
+
+    fn rem(self, other: BitVector) -> Self::Output {
+        Self(self.0 % other.0)
     }
 }
 

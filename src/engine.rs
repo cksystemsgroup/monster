@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_wraps)]
+
 use crate::{
     boolector::Boolector,
     bug::{BasicInfo, Bug},
@@ -614,7 +616,10 @@ where
 
         let result = self.run();
 
-        if !matches!(result, Err(EngineError::ExecutionDepthReached(_)) | Ok(None)) {
+        if !matches!(
+            result,
+            Err(EngineError::ExecutionDepthReached(_)) | Ok(None)
+        ) {
             return result;
         }
 

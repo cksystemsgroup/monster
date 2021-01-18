@@ -1,4 +1,5 @@
 //! # Disassemble RISC-U instructions
+#![allow(clippy::from_over_into)]
 
 use anyhow::Result;
 use log::info;
