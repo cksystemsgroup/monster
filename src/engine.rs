@@ -1,4 +1,4 @@
-#![allow(clippy::unnecessary_wraps)]
+
 
 use crate::{
     boolector::Boolector,
