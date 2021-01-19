@@ -88,7 +88,7 @@ impl Rem<BitVector> for BitVector {
         if other == BitVector(0) {
             self
         } else {
-            Self(self.0.wrapping_div(other.0))
+            Self(self.0.wrapping_rem(other.0))
         }
     }
 }
