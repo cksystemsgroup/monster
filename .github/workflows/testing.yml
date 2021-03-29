@@ -1,0 +1,16 @@
+name: Testing
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      # Checking whether this step is run ...
+      - name: Simple Echoing Step
+        run: echo Hello, step!
