@@ -3,10 +3,11 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 use super::{
-    Assignment, BVOperator, BitVector, Formula, OperandSide, Solver, SolverError, Symbol, SymbolId,
+    Assignment, BVOperator, BitVector, CPResult, Formula, OperandSide, Solver, SolverError, Symbol,
+    SymbolId, TritVector,
 };
 use divisors::get_divisors;
-use log::{log_enabled, trace, Level};
+use log::{debug, log_enabled, trace, Level};
 use rand::{distributions::Uniform, random, seq::SliceRandom, thread_rng, Rng};
 use std::time::{Duration, Instant};
 
@@ -32,6 +33,8 @@ impl Solver for MonsterSolver {
     }
 
     fn solve_impl<F: Formula>(&self, formula: &F) -> Result<Option<Assignment>, SolverError> {
+        let _cb = compute_constant_bits(formula)?;
+
         let ab = initialize_ab(formula);
 
         sat(formula, ab, self.timeout)
@@ -89,6 +92,215 @@ fn is_invertible(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> 
         BVOperator::Not => true,
         BVOperator::BitwiseAnd => (t & s) == t,
         BVOperator::Equals => true,
+    }
+}
+
+fn compute_constant_bits<F: Formula>(formula: &F) -> Result<Vec<TritVector>, SolverError> {
+    // constrains trit vectors corresponding to boolean results to <0,1>
+    // initializes inputs to full domain <0..0, 1..1> and root to target value <1,1>
+    fn initialize_cb<F: Formula>(formula: &F) -> Vec<TritVector> {
+        let max_id = formula
+            .symbol_ids()
+            .max()
+            .expect("formula should not be empty");
+
+        let mut cb = Vec::with_capacity(std::mem::size_of::<TritVector>() * (max_id + 1));
+        unsafe {
+            cb.set_len(max_id + 1);
+        }
+
+        formula.symbol_ids().for_each(|i| {
+            cb[i] = match formula[i] {
+                Symbol::Input(_) => TritVector::default(),
+                Symbol::Constant(c) => TritVector { l: c, u: c },
+                Symbol::Operator(o) => match o {
+                    BVOperator::Not | BVOperator::Equals | BVOperator::Sltu => {
+                        TritVector::new(0, 1).unwrap()
+                    }
+                    _ => TritVector::default(),
+                },
+            }
+        });
+
+        cb[formula.root()] = TritVector::one();
+
+        if log_enabled!(Level::Trace) {
+            formula
+                .symbol_ids()
+                .filter(|i| matches!(formula[*i], Symbol::Input(_)))
+                .for_each(|i| {
+                    trace!("initialize: x{} <- <{}, {}>", i, cb[i].l.0, cb[i].u.0);
+                });
+        }
+        cb
+    }
+
+    let mut cb = initialize_cb(formula);
+    let mut stack = vec![formula.root()];
+
+    // propagate until fixpoint is reached
+    // a conflict during propagation yields an unsat error
+    while let Some(n) = stack.pop() {
+        match propagate_constraint(formula, &mut cb, n) {
+            Ok(None) => continue,
+            Ok(Some(updated)) => stack.extend(updated),
+            Err(SolverError::Unsat) => return Err(SolverError::Unsat),
+            _ => panic!("unexpected error during constraint propagation"),
+        }
+    }
+
+    Ok(cb)
+}
+
+fn propagate_constraint<F: Formula>(
+    f: &F,
+    cb: &mut Vec<TritVector>,
+    n: SymbolId,
+) -> Result<Option<Vec<usize>>, SolverError> {
+    // propagate binary/unary constraint and return (possibly) updated trit vectors
+    // an unsatisfiable constraint yields an error
+    fn constrain_binary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+    ) -> CPResult<(TritVector, TritVector, TritVector)> {
+        if let (lhs, Some(rhs)) = f.operands(n) {
+            let x = cb[lhs];
+            let y = cb[rhs];
+            let z = cb[n];
+
+            match &f[n] {
+                Symbol::Operator(op) => match op {
+                    BVOperator::Add => z.constrain_add(x, y, true),
+                    BVOperator::Sub => z.constrain_sub(x, y),
+                    BVOperator::Mul => z.constrain_mul(x, y, true),
+                    BVOperator::Divu => z.constrain_divu(x, y),
+                    BVOperator::BitwiseAnd => z.constrain_and(x, y),
+                    BVOperator::Sltu => z.constrain_reif_sltu(x, y),
+                    BVOperator::Equals => z.constrain_reif_eq(x, y),
+                    _ => Ok((x, y, z)),
+                },
+                _ => unreachable!("unexpected symbol: {:?}", f[n]),
+            }
+        } else {
+            panic!("can not update binary operator with 1 operand")
+        }
+    }
+
+    fn constrain_unary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+    ) -> CPResult<(TritVector, TritVector)> {
+        if let (p, None) = f.operands(n) {
+            let x = cb[p];
+            let z = cb[n];
+
+            match &f[n] {
+                Symbol::Operator(BVOperator::Not) => z.constrain_not(x),
+                _ => unreachable!("unexpected symbol: {:?}", f[n]),
+            }
+        } else {
+            panic!("can not update unary operator with more than one operand")
+        }
+    }
+
+    // update trit vectors after successful propagation (otherwise SolverError)
+    // return modified trit vectors for further propagation
+    fn update_binary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+        s: &str,
+    ) -> Result<Option<Vec<usize>>, SolverError> {
+        if let (lhs, Some(rhs)) = f.operands(n) {
+            if let Ok((z, x, y)) = constrain_binary(f, cb, n) {
+                debug!(
+                    "constrain: x{}({}) := x{}({}) {} x{}({})",
+                    n, cb[n], lhs, cb[lhs], s, rhs, cb[rhs]
+                );
+                debug!(
+                    "update with: x{}({}) := x{}({}) {} x{}({})",
+                    n, z, lhs, x, s, rhs, y
+                );
+
+                let previous = [cb[lhs], cb[rhs], cb[n]];
+
+                cb[n] = z;
+                cb[lhs] = x;
+                cb[rhs] = y;
+
+                // filter modified trit vectors
+                let updated = vec![lhs, rhs, n]
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, &e)| previous[*i] != cb[e])
+                    .map(|(_i, &e)| e)
+                    .collect();
+
+                Ok(Some(updated))
+            } else {
+                debug!(
+                    "UNSAT constraint found propagating: x{}({}) := x{}({}) {} x{}({})",
+                    n, cb[n], lhs, cb[lhs], s, rhs, cb[rhs]
+                );
+
+                Err(SolverError::Unsat)
+            }
+        } else {
+            panic!("can not update binary operator with 1 operand")
+        }
+    }
+
+    fn update_unary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+        s: &str,
+    ) -> Result<Option<Vec<usize>>, SolverError> {
+        if let (p, None) = f.operands(n) {
+            if let Ok((z, x)) = constrain_unary(f, cb, n) {
+                debug!("constrain: x{}({}) := {} x{}({})", n, cb[n], s, p, cb[p]);
+                debug!("update with: x{}({}) := {} x{}({})", n, z, s, p, x);
+
+                let previous = [cb[p], cb[n]];
+
+                cb[n] = z;
+                cb[p] = x;
+
+                let updated = vec![p, n]
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, &e)| previous[*i] != cb[e])
+                    .map(|(_i, &e)| e)
+                    .collect::<Vec<usize>>();
+
+                Ok(Some(updated))
+            } else {
+                debug!(
+                    "UNSAT constraint found propagating: x{}({}) := {} x{}({})",
+                    n, cb[n], s, p, cb[p]
+                );
+                Err(SolverError::Unsat)
+            }
+        } else {
+            panic!("can not update unary operator with more than one operand")
+        }
+    }
+
+    match &f[n] {
+        Symbol::Constant(_) | Symbol::Input(_) => Ok(None),
+        Symbol::Operator(op) => match op {
+            BVOperator::Add => update_binary(f, cb, n, "+"),
+            BVOperator::Sub => update_binary(f, cb, n, "-"),
+            BVOperator::Mul => update_binary(f, cb, n, "*"),
+            BVOperator::Divu => update_binary(f, cb, n, "/"),
+            BVOperator::BitwiseAnd => update_binary(f, cb, n, "&"),
+            BVOperator::Sltu => update_binary(f, cb, n, "<"),
+            BVOperator::Remu => update_binary(f, cb, n, "%"),
+            BVOperator::Equals => update_binary(f, cb, n, "="),
+            BVOperator::Not => update_unary(f, cb, n, "!"),
+        },
     }
 }
 

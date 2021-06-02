@@ -15,6 +15,10 @@ impl BitVector {
         self.0.trailing_zeros()
     }
 
+    pub fn cno(&self) -> u32 {
+        self.0.count_ones()
+    }
+
     pub fn odd(&self) -> bool {
         self.0 % 2 == 1
     }
@@ -34,6 +38,18 @@ impl BitVector {
 
     pub fn mulo(&self, t: BitVector) -> bool {
         self.0.overflowing_mul(t.0).1
+    }
+
+    pub fn bit(&self, n: u32) -> BitVector {
+        BitVector((self.0 >> n) & 1)
+    }
+
+    pub fn mask(n: u64) -> BitVector {
+        if let Some(b) = u64::max_value().checked_shl((64 - n) as u32) {
+            BitVector(b)
+        } else {
+            BitVector(0)
+        }
     }
 }
 

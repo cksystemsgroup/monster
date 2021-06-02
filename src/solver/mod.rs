@@ -1,6 +1,7 @@
 mod bitvec;
 mod monster;
 mod smt;
+mod tritvec;
 
 #[cfg(feature = "boolector")]
 mod boolector;
@@ -14,7 +15,7 @@ pub use self::boolector::*;
 #[cfg(feature = "z3")]
 pub use self::z3::*;
 
-pub use self::{bitvec::*, monster::*, smt::*};
+pub use self::{bitvec::*, monster::*, smt::*, tritvec::*};
 
 use log::debug;
 use std::marker::Sync;
@@ -50,6 +51,9 @@ pub enum SolverError {
 
     #[error("solver failed with IO error")]
     IoError(String),
+
+    #[error("determined unsatisfiability during constraint propagation")]
+    Unsat,
 }
 
 #[derive(Debug, EnumString, EnumVariantNames, IntoStaticStr)]
