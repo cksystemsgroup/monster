@@ -1,6 +1,7 @@
 mod bitvec;
 mod monster;
 mod smt;
+mod monsterx;
 mod tritvec;
 
 #[cfg(feature = "boolector")]
@@ -15,7 +16,7 @@ pub use self::boolector::*;
 #[cfg(feature = "z3")]
 pub use self::z3::*;
 
-pub use self::{bitvec::*, monster::*, smt::*, tritvec::*};
+pub use self::{bitvec::*, monster::*, monsterx::*, smt::*, tritvec::*};
 
 use log::debug;
 use std::marker::Sync;
@@ -60,6 +61,7 @@ pub enum SolverError {
 #[strum(serialize_all = "kebab_case")]
 pub enum SolverType {
     Monster,
+    MonsterX,
     #[cfg(feature = "boolector")]
     Boolector,
     #[cfg(feature = "z3")]

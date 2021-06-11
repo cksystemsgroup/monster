@@ -16,7 +16,7 @@ use monster::{
     rarity_simulate_elf_with,
     solver::{
         self,
-        SolverType::{self, Monster},
+        SolverType::{self, Monster, MonsterX},
     },
     symbolically_execute_elf_with, RaritySimulationOptions, SmtGenerationOptions,
     SymbolicExecutionOptions,
@@ -128,6 +128,12 @@ fn main() -> Result<()> {
                     &ShortestPathStrategy::compute_for(&program)?,
                     &solver::MonsterSolver::default(),
                 ),
+                (ShortestPaths, MonsterX) => symbolically_execute_elf_with(
+                    &input,
+                    &options,
+                    &ShortestPathStrategy::compute_for(&program)?,
+                    &solver::MonsterXSolver::default(),
+                ),
                 #[cfg(feature = "boolector")]
                 (ShortestPaths, Boolector) => symbolically_execute_elf_with(
                     &input,
@@ -147,6 +153,12 @@ fn main() -> Result<()> {
                     &options,
                     &CoinFlipStrategy::default(),
                     &solver::MonsterSolver::default(),
+                ),
+                (CoinFlip, MonsterX) => symbolically_execute_elf_with(
+                    &input,
+                    &options,
+                    &CoinFlipStrategy::default(),
+                    &solver::MonsterXSolver::default(),
                 ),
                 #[cfg(feature = "boolector")]
                 (CoinFlip, Boolector) => symbolically_execute_elf_with(

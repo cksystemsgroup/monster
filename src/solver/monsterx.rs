@@ -3,60 +3,69 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 use super::{
-    Assignment, BVOperator, BitVector, Formula, OperandSide, Solver, SolverError, Symbol, SymbolId,
+    Assignment, BVOperator, BitVector, CPResult, Formula, OperandSide, Solver, SolverError, Symbol,
+    SymbolId, TritVector,
 };
 use divisors::get_divisors;
-use log::{log_enabled, trace, Level};
+use log::{debug, log_enabled, trace, Level};
 use rand::{distributions::Uniform, random, seq::SliceRandom, thread_rng, Rng};
 use std::time::{Duration, Instant};
 
-pub struct MonsterSolver {
+pub struct MonsterXSolver {
     timeout: Duration,
 }
 
-impl Default for MonsterSolver {
+impl Default for MonsterXSolver {
     fn default() -> Self {
         Self::new(Duration::new(3, 0))
     }
 }
 
-impl MonsterSolver {
+impl MonsterXSolver {
     pub fn new(timeout: Duration) -> Self {
         Self { timeout }
     }
 }
 
-impl Solver for MonsterSolver {
+impl Solver for MonsterXSolver {
     fn name() -> &'static str {
-        "Monster"
+        "MonsterX"
     }
 
     fn solve_impl<F: Formula>(&self, formula: &F) -> Result<Option<Assignment>, SolverError> {
+        let cb = compute_constant_bits(formula)?;
+
         let ab = initialize_ab(formula);
 
-        sat(formula, ab, self.timeout)
+        sat(formula, ab, cb, self.timeout)
     }
 }
 
-// check if invertibility condition is met
-fn is_invertible(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> bool {
+// check if invertability condition is met
+fn is_invertable(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> bool {
     match op {
         BVOperator::Add => true,
         BVOperator::Sub => true,
         BVOperator::Mul => (-s | s) & t == t,
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
-                if s == BitVector(0) {
-                    t == BitVector::ones()
+                if (t == BitVector::ones()) && s == BitVector(0) {
+                    false
+                } else if (t == BitVector::ones()) && (s != BitVector(0)) && (s != BitVector(1)) {
+                    false
+                } else if (t != BitVector::ones()) && (s == BitVector(0)) {
+                    false
                 } else {
                     !t.mulo(s)
                 }
             }
             OperandSide::Rhs => {
-                if t == BitVector(0) {
-                    s != BitVector::ones()
+                if (t == s) && (t == BitVector(0)) {
+                    false
+                } else if (t == BitVector(0)) && (s == BitVector::ones()) {
+                    false
                 } else {
-                    t == BitVector::ones() || !(s < t)
+                    !(s < t)
                 }
             }
         },
@@ -79,16 +88,221 @@ fn is_invertible(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> 
         BVOperator::Remu => match d {
             OperandSide::Lhs => !(s <= t),
             OperandSide::Rhs => {
-                if s == t {
-                    true
-                } else {
-                    !((s < t) || ((t != BitVector(0)) && t == s - BitVector(1)) || (s - t <= t))
-                }
+                !(s < t) || ((t != BitVector(0)) && t == s - BitVector(1)) || (s - t <= t)
             }
         },
         BVOperator::Not => true,
         BVOperator::BitwiseAnd => (t & s) == t,
         BVOperator::Equals => true,
+    }
+}
+
+fn compute_constant_bits<F: Formula>(formula: &F) -> Result<Vec<TritVector>, SolverError> {
+    // constrains trit vectors corresponding to boolean results to <0,1>
+    // initializes inputs to full domain <0..0, 1..1> and root to target value <1,1>
+    fn initialize_cb<F: Formula>(formula: &F) -> Vec<TritVector> {
+        let max_id = formula
+            .symbol_ids()
+            .max()
+            .expect("formula should not be empty");
+
+        let mut cb = Vec::with_capacity(std::mem::size_of::<TritVector>() * (max_id + 1));
+        unsafe {
+            cb.set_len(max_id + 1);
+        }
+
+        formula.symbol_ids().for_each(|i| {
+            cb[i] = match formula[i] {
+                Symbol::Input(_) => TritVector::default(),
+                Symbol::Constant(c) => TritVector { l: c, u: c },
+                Symbol::Operator(o) => match o {
+                    BVOperator::Not | BVOperator::Equals | BVOperator::Sltu => {
+                        TritVector::new(0, 1).unwrap()
+                    }
+                    _ => TritVector::default(),
+                },
+            }
+        });
+
+        cb[formula.root()] = TritVector::one();
+
+        if log_enabled!(Level::Trace) {
+            formula
+                .symbol_ids()
+                .filter(|i| matches!(formula[*i], Symbol::Input(_)))
+                .for_each(|i| {
+                    trace!("initialize: x{} <- <{}, {}>", i, cb[i].l.0, cb[i].u.0);
+                });
+        }
+        cb
+    }
+
+    let mut cb = initialize_cb(formula);
+    let mut stack = vec![formula.root()];
+
+    // propagate until fixpoint is reached
+    // a conflict during propagation yields an unsat error
+    while let Some(n) = stack.pop() {
+        match propagate_constraint(formula, &mut cb, n) {
+            Ok(None) => continue,
+            Ok(Some(updated)) => stack.extend(updated),
+            Err(SolverError::Unsat) => return Err(SolverError::Unsat),
+            _ => panic!("unexpected error during constraint propagation"),
+        }
+    }
+
+    Ok(cb)
+}
+
+fn propagate_constraint<F: Formula>(
+    f: &F,
+    cb: &mut Vec<TritVector>,
+    n: SymbolId,
+) -> Result<Option<Vec<usize>>, SolverError> {
+    // propagate binary/unary constraint and return (possibly) updated trit vectors
+    // an unsatisfiable constraint yields an error
+    fn constrain_binary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+    ) -> CPResult<(TritVector, TritVector, TritVector)> {
+        if let (lhs, Some(rhs)) = f.operands(n) {
+            let x = cb[lhs];
+            let y = cb[rhs];
+            let z = cb[n];
+
+            match &f[n] {
+                Symbol::Operator(op) => match op {
+                    BVOperator::Add => z.constrain_add(x, y, true),
+                    BVOperator::Sub => z.constrain_sub(x, y),
+                    BVOperator::Mul => z.constrain_mul(x, y, true),
+                    BVOperator::Divu => z.constrain_divu(x, y),
+                    BVOperator::BitwiseAnd => z.constrain_and(x, y),
+                    BVOperator::Sltu => z.constrain_reif_sltu(x, y),
+                    BVOperator::Equals => z.constrain_reif_eq(x, y),
+                    _ => Ok((x, y, z)),
+                },
+                _ => unreachable!("unexpected symbol: {:?}", f[n]),
+            }
+        } else {
+            panic!("can not update binary operator with 1 operand")
+        }
+    }
+
+    fn constrain_unary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+    ) -> CPResult<(TritVector, TritVector)> {
+        if let (p, None) = f.operands(n) {
+            let x = cb[p];
+            let z = cb[n];
+
+            match &f[n] {
+                Symbol::Operator(BVOperator::Not) => z.constrain_not(x),
+                _ => unreachable!("unexpected symbol: {:?}", f[n]),
+            }
+        } else {
+            panic!("can not update unary operator with more than one operand")
+        }
+    }
+
+    // update trit vectors after successful propagation (otherwise SolverError)
+    // return modified trit vectors for further propagation
+    fn update_binary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+        s: &str,
+    ) -> Result<Option<Vec<usize>>, SolverError> {
+        if let (lhs, Some(rhs)) = f.operands(n) {
+            if let Ok((z, x, y)) = constrain_binary(f, cb, n) {
+                debug!(
+                    "constrain: x{}({}) := x{}({}) {} x{}({})",
+                    n, cb[n], lhs, cb[lhs], s, rhs, cb[rhs]
+                );
+                debug!(
+                    "update with: x{}({}) := x{}({}) {} x{}({})",
+                    n, z, lhs, x, s, rhs, y
+                );
+
+                let previous = [cb[lhs], cb[rhs], cb[n]];
+
+                cb[n] = z;
+                cb[lhs] = x;
+                cb[rhs] = y;
+
+                // filter modified trit vectors
+                let updated = vec![lhs, rhs, n]
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, &e)| previous[*i] != cb[e])
+                    .map(|(_i, &e)| e)
+                    .collect();
+
+                Ok(Some(updated))
+            } else {
+                debug!(
+                    "UNSAT constraint found propagating: x{}({}) := x{}({}) {} x{}({})",
+                    n, cb[n], lhs, cb[lhs], s, rhs, cb[rhs]
+                );
+
+                Err(SolverError::Unsat)
+            }
+        } else {
+            panic!("can not update binary operator with 1 operand")
+        }
+    }
+
+    fn update_unary<F: Formula>(
+        f: &F,
+        cb: &mut Vec<TritVector>,
+        n: SymbolId,
+        s: &str,
+    ) -> Result<Option<Vec<usize>>, SolverError> {
+        if let (p, None) = f.operands(n) {
+            if let Ok((z, x)) = constrain_unary(f, cb, n) {
+                debug!("constrain: x{}({}) := {} x{}({})", n, cb[n], s, p, cb[p]);
+                debug!("update with: x{}({}) := {} x{}({})", n, z, s, p, x);
+
+                let previous = [cb[p], cb[n]];
+
+                cb[n] = z;
+                cb[p] = x;
+
+                let updated = vec![p, n]
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, &e)| previous[*i] != cb[e])
+                    .map(|(_i, &e)| e)
+                    .collect::<Vec<usize>>();
+
+                Ok(Some(updated))
+            } else {
+                debug!(
+                    "UNSAT constraint found propagating: x{}({}) := {} x{}({})",
+                    n, cb[n], s, p, cb[p]
+                );
+                Err(SolverError::Unsat)
+            }
+        } else {
+            panic!("can not update unary operator with more than one operand")
+        }
+    }
+
+    match &f[n] {
+        Symbol::Constant(_) | Symbol::Input(_) => Ok(None),
+        Symbol::Operator(op) => match op {
+            BVOperator::Add => update_binary(f, cb, n, "+"),
+            BVOperator::Sub => update_binary(f, cb, n, "-"),
+            BVOperator::Mul => update_binary(f, cb, n, "*"),
+            BVOperator::Divu => update_binary(f, cb, n, "/"),
+            BVOperator::BitwiseAnd => update_binary(f, cb, n, "&"),
+            BVOperator::Sltu => update_binary(f, cb, n, "<"),
+            BVOperator::Remu => update_binary(f, cb, n, "%"),
+            BVOperator::Equals => update_binary(f, cb, n, "="),
+            BVOperator::Not => update_unary(f, cb, n, "!"),
+        },
     }
 }
 
@@ -180,7 +394,7 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
 
             let y_inv = y
                 .modinverse()
-                .expect("a modular inverse has to exist iff operator is invertible");
+                .expect("a modular inverse has to exist iff operator is invertable");
 
             let result = (t >> s.ctz()) * y_inv;
 
@@ -420,7 +634,7 @@ fn value<F: Formula>(
         Symbol::Operator(op) => {
             let consistent = compute_consistent_value(*op, t, side);
 
-            if is_invertible(*op, s, t, side) {
+            if is_invertable(*op, s, t, side) {
                 let inverse = compute_inverse_value(*op, s, t, side);
                 let choose_inverse =
                     rand::thread_rng().gen_range(0.0_f64..=1.0_f64) < CHOOSE_INVERSE;
@@ -449,7 +663,7 @@ fn is_essential<F: Formula>(
     let ab_nx = ab[this];
 
     match &formula[other] {
-        Symbol::Operator(op) => !is_invertible(*op, ab_nx, t, on_side.other()),
+        Symbol::Operator(op) => !is_invertable(*op, ab_nx, t, on_side.other()),
         // TODO: not mentioned in paper => improvised. is that really true?
         Symbol::Constant(_) | Symbol::Input(_) => false,
     }
@@ -561,6 +775,7 @@ fn propagate_assignment<F: Formula>(f: &F, ab: &mut Vec<BitVector>, n: SymbolId)
 fn sat<F: Formula>(
     formula: &F,
     mut ab: Vec<BitVector>,
+    _cb: Vec<TritVector>,
     timeout_time: Duration,
 ) -> Result<Option<Assignment>, SolverError> {
     let mut iterations = 0;
@@ -684,7 +899,7 @@ mod tests {
 
         let root = add_equals_constraint(&mut data_flow, input_idx, OperandSide::Lhs, 10);
 
-        let solver = MonsterSolver::default();
+        let solver = MonsterXSolver::default();
         let formula = FormulaView::new(&data_flow, root);
         let result = solver.solve(&formula);
 
@@ -717,7 +932,7 @@ mod tests {
 
         let root = add_equals_constraint(&mut data_flow, instr_idx, OperandSide::Lhs, 10);
 
-        let solver = MonsterSolver::default();
+        let solver = MonsterXSolver::default();
         let formula = FormulaView::new(&data_flow, root);
         let result = solver.solve(&formula);
 
@@ -732,7 +947,7 @@ mod tests {
         );
     }
 
-    fn test_invertibility(
+    fn test_invertability(
         op: BVOperator,
         s: u64,
         t: u64,
@@ -746,7 +961,7 @@ mod tests {
         match d {
             OperandSide::Lhs => {
                 assert_eq!(
-                    is_invertible(op, s, t, d),
+                    is_invertable(op, s, t, d),
                     result,
                     "x {:?} {:?} == {:?}   {}",
                     op,
@@ -757,7 +972,7 @@ mod tests {
             }
             OperandSide::Rhs => {
                 assert_eq!(
-                    is_invertible(op, s, t, d),
+                    is_invertable(op, s, t, d),
                     result,
                     "{:?} {:?} x == {:?}   {}",
                     s,
@@ -825,15 +1040,15 @@ mod tests {
             BVOperator::Add => t - computed,
             BVOperator::Mul => {
                 assert!(
-                    is_invertible(op, computed, t, d),
-                    "choose values which are invertible..."
+                    is_invertable(op, computed, t, d),
+                    "choose values which are invertable..."
                 );
 
                 compute_inverse_value(op, computed, t, d)
             }
             BVOperator::Sltu => compute_inverse_value(op, computed, t, d),
             BVOperator::Divu => {
-                assert!(is_invertible(op, computed, t, d));
+                assert!(is_invertable(op, computed, t, d));
                 compute_inverse_value(op, computed, t, d)
             }
             _ => unimplemented!(),
@@ -871,26 +1086,26 @@ mod tests {
     const REMU: BVOperator = BVOperator::Remu;
 
     #[test]
-    fn check_invertibility_condition_for_divu() {
-        test_invertibility(DIVU, 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
-        test_invertibility(DIVU, 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
+    fn check_invertability_condition_for_divu() {
+        test_invertability(DIVU, 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
+        test_invertability(DIVU, 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
 
-        test_invertibility(DIVU, 3, 2, OperandSide::Lhs, true, "x / 3 = 2");
-        test_invertibility(DIVU, 6, 2, OperandSide::Rhs, true, "6 / x = 2");
+        test_invertability(DIVU, 3, 2, OperandSide::Lhs, true, "x / 3 = 2");
+        test_invertability(DIVU, 6, 2, OperandSide::Rhs, true, "6 / x = 2");
 
-        test_invertibility(DIVU, 0, 2, OperandSide::Lhs, false, "x / 0 = 2");
-        test_invertibility(DIVU, 0, 2, OperandSide::Rhs, false, "0 / x = 2");
+        test_invertability(DIVU, 0, 2, OperandSide::Lhs, false, "x / 0 = 2");
+        test_invertability(DIVU, 0, 2, OperandSide::Rhs, false, "0 / x = 2");
 
-        test_invertibility(DIVU, 5, 6, OperandSide::Rhs, false, "5 / x = 6");
+        test_invertability(DIVU, 5, 6, OperandSide::Rhs, false, "5 / x = 6");
     }
 
     #[test]
-    fn check_invertibility_condition_for_mul() {
+    fn check_invertability_condition_for_mul() {
         let side = OperandSide::Lhs;
 
-        test_invertibility(MUL, 0b1, 0b1, side, true, "trivial multiplication");
-        test_invertibility(MUL, 0b10, 0b1, side, false, "operand bigger than result");
-        test_invertibility(
+        test_invertability(MUL, 0b1, 0b1, side, true, "trivial multiplication");
+        test_invertability(MUL, 0b10, 0b1, side, false, "operand bigger than result");
+        test_invertability(
             MUL,
             0b10,
             0b10,
@@ -898,7 +1113,7 @@ mod tests {
             true,
             "operand with undetermined bits and possible invsere",
         );
-        test_invertibility(
+        test_invertability(
             MUL,
             0b10,
             0b10,
@@ -906,7 +1121,7 @@ mod tests {
             true,
             "operand with undetermined bits and no inverse value",
         );
-        test_invertibility(
+        test_invertability(
             MUL,
             0b100,
             0b100,
@@ -914,7 +1129,7 @@ mod tests {
             true,
             "operand with undetermined bits and no inverse value",
         );
-        test_invertibility(
+        test_invertability(
             MUL,
             0b10,
             0b1100,
@@ -925,12 +1140,12 @@ mod tests {
     }
 
     #[test]
-    fn check_invertibility_condition_for_sltu() {
+    fn check_invertability_condition_for_sltu() {
         let mut side = OperandSide::Lhs;
 
-        test_invertibility(SLTU, 0, 1, side, false, "x < 0 == 1 FALSE");
-        test_invertibility(SLTU, 1, 1, side, true, "x < 1 == 1 TRUE");
-        test_invertibility(
+        test_invertability(SLTU, 0, 1, side, false, "x < 0 == 1 FALSE");
+        test_invertability(SLTU, 1, 1, side, true, "x < 1 == 1 TRUE");
+        test_invertability(
             SLTU,
             u64::max_value(),
             0,
@@ -941,9 +1156,9 @@ mod tests {
 
         side = OperandSide::Rhs;
 
-        test_invertibility(SLTU, 0, 1, side, true, "0 < x == 1 TRUE");
-        test_invertibility(SLTU, 0, 0, side, true, "0 < x == 0 TRUE");
-        test_invertibility(
+        test_invertability(SLTU, 0, 1, side, true, "0 < x == 1 TRUE");
+        test_invertability(SLTU, 0, 0, side, true, "0 < x == 0 TRUE");
+        test_invertability(
             SLTU,
             u64::max_value(),
             1,
@@ -951,7 +1166,7 @@ mod tests {
             false,
             "max_value < x == 1 FALSE",
         );
-        test_invertibility(
+        test_invertability(
             SLTU,
             u64::max_value(),
             0,
@@ -962,20 +1177,6 @@ mod tests {
     }
 
     #[test]
-    fn check_invertibility_condition_for_remu() {
-        let mut side = OperandSide::Lhs;
-
-        test_invertibility(REMU, 3, 2, side, true, "x mod 3 = 2 TRUE");
-        test_invertibility(REMU, 3, 3, side, false, "x mod 3 = 3 FALSE");
-
-        side = OperandSide::Rhs;
-
-        test_invertibility(REMU, 3, 3, side, true, "3 mod x = 3 TRUE");
-        test_invertibility(REMU, 3, 2, side, false, "3 mod x = 2 FALSE");
-        test_invertibility(REMU, 5, 3, side, false, "5 mod x = 3 FALSE");
-    }
-
-    #[test]
     fn compute_inverse_values_for_mul() {
         let side = OperandSide::Lhs;
 
@@ -983,7 +1184,7 @@ mod tests {
             l * r
         }
 
-        // test only for values which are actually invertible
+        // test only for values which are actually invertable
         test_inverse_value_computation(MUL, 0b1, 0b1, side, f);
         test_inverse_value_computation(MUL, 0b10, 0b10, side, f);
         test_inverse_value_computation(MUL, 0b100, 0b100, side, f);
@@ -1002,7 +1203,7 @@ mod tests {
             }
         }
 
-        // test only for values which are actually invertible
+        // test only for values which are actually invertable
         test_inverse_value_computation(SLTU, u64::max_value(), 0, side, f);
         test_inverse_value_computation(SLTU, 0, 0, side, f);
         test_inverse_value_computation(SLTU, 1, 1, side, f);
@@ -1020,7 +1221,7 @@ mod tests {
             l / r
         }
 
-        // test only for values which are actually invertible
+        // test only for values which are actually invertable
         test_inverse_value_computation(DIVU, 0b1, 0b1, OperandSide::Lhs, f);
         test_inverse_value_computation(DIVU, 0b1, 0b1, OperandSide::Rhs, f);
 
@@ -1034,7 +1235,7 @@ mod tests {
             l % r
         }
 
-        // test only for values which are actually invertible
+        // test only for values which are actually invertable
         test_inverse_value_computation(REMU, u64::max_value(), 0, OperandSide::Lhs, f);
         test_inverse_value_computation(
             REMU,
@@ -1045,7 +1246,6 @@ mod tests {
         );
         test_inverse_value_computation(REMU, 3, 2, OperandSide::Lhs, f);
         test_inverse_value_computation(REMU, 5, 2, OperandSide::Rhs, f);
-        test_inverse_value_computation(REMU, 3, 3, OperandSide::Rhs, f);
     }
 
     #[test]
