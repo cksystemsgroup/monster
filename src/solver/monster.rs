@@ -238,12 +238,14 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
                 }
             }
             OperandSide::Rhs => {
-                if (t == s) && t == BitVector::ones() {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, 1)))
-                } else if (t == BitVector::ones()) && (s != BitVector::ones()) {
-                    BitVector(0)
+                if (t == s) && t == BitVector(0) {
+                    BitVector(random::<u64>())
+                } else if t == BitVector::ones() {
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, s.0 / t.0)))
                 } else {
-                    s / t
+                    BitVector(
+                        thread_rng().sample(Uniform::new_inclusive(s.0 / (t.0 + 1), s.0 / t.0)),
+                    )
                 }
             }
         },
@@ -283,7 +285,7 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
                 }
             }
         },
-        BVOperator::BitwiseAnd => BitVector(random::<u64>()) | t,
+        BVOperator::BitwiseAnd => (!s & BitVector(random::<u64>())) | t,
         BVOperator::Equals => {
             if t == BitVector(0) {
                 loop {
