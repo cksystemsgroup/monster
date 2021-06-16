@@ -307,13 +307,11 @@ fn compute_consistent_value(op: BVOperator, t: BitVector, d: OperandSide) -> Bit
         BVOperator::Add | BVOperator::Sub | BVOperator::Equals => BitVector(random::<u64>()),
         BVOperator::Mul => {
             let shift = thread_rng().sample(Uniform::new_inclusive(0, t.ctz()));
-            let mask0 = if shift == 64 {
-                BitVector(0)
+            if shift == 64 {
+                BitVector(random::<u64>())
             } else {
-                BitVector::ones() << shift
-            };
-
-            BitVector(random::<u64>() | 1) & mask0
+                BitVector(random::<u64>() | 1 << shift) & (BitVector::ones() << shift)
+            }
         }
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
