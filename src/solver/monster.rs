@@ -244,7 +244,7 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
                     BitVector(thread_rng().sample(Uniform::new_inclusive(0, s.0 / t.0)))
                 } else {
                     BitVector(
-                        thread_rng().sample(Uniform::new_inclusive(s.0 / (t.0 + 1), s.0 / t.0)),
+                        thread_rng().sample(Uniform::new_inclusive(s.0 / (t.0 + 1) + 1, s.0 / t.0)),
                     )
                 }
             }
@@ -305,37 +305,35 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
 fn compute_consistent_value(op: BVOperator, t: BitVector, d: OperandSide) -> BitVector {
     match op {
         BVOperator::Add | BVOperator::Sub | BVOperator::Equals => BitVector(random::<u64>()),
-        BVOperator::Mul => BitVector({
-            if t == BitVector(0) {
-                0
+        BVOperator::Mul => {
+            let shift = thread_rng().sample(Uniform::new_inclusive(0, t.ctz()));
+            let mask0 = if shift == 64 {
+                BitVector(0)
             } else {
-                let mut r;
-                loop {
-                    r = random::<u128>();
-                    if r != 0 {
-                        break;
-                    }
-                }
-                if t.ctz() < r.trailing_zeros() {
-                    r >>= r.trailing_zeros() - t.ctz();
-                }
-                assert!(t.ctz() >= r.trailing_zeros());
-                r as u64
-            }
-        }),
+                BitVector::ones() << shift
+            };
+
+            BitVector(random::<u64>() | 1) & mask0
+        }
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
-                if (t == BitVector::ones()) || (t == BitVector(0)) {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, u64::max_value() - 1)))
+                if t == BitVector::ones() {
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, u64::max_value())))
+                } else if t == BitVector(0) {
+                    BitVector(thread_rng().sample(Uniform::new(0, u64::max_value())))
+                } else if t > BitVector::ones() - t {
+                    t
                 } else {
-                    let mut y = BitVector(0);
-                    while !(y != BitVector(0)) && !(y.mulo(t)) {
-                        y = BitVector(
-                            thread_rng().sample(Uniform::new_inclusive(0, u64::max_value())),
-                        );
-                    }
+                    let y = BitVector(
+                        thread_rng().sample(Uniform::new_inclusive(1, u64::max_value() / t.0)),
+                    );
+                    let range_end = if y.addo(BitVector(1)) || !t.mulo(y + BitVector(1)) {
+                        u64::max_value()
+                    } else {
+                        t.0 * (y.0 + 1) - 1
+                    };
 
-                    y * t
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(t.0 * y.0, range_end)))
                 }
             }
             OperandSide::Rhs => {
@@ -343,7 +341,7 @@ fn compute_consistent_value(op: BVOperator, t: BitVector, d: OperandSide) -> Bit
                     BitVector(thread_rng().sample(Uniform::new_inclusive(0, 1)))
                 } else {
                     BitVector(
-                        thread_rng().sample(Uniform::new_inclusive(0, u64::max_value() / t.0)),
+                        thread_rng().sample(Uniform::new_inclusive(1, u64::max_value() / t.0)),
                     )
                 }
             }
@@ -372,8 +370,17 @@ fn compute_consistent_value(op: BVOperator, t: BitVector, d: OperandSide) -> Bit
             OperandSide::Lhs => {
                 if t == BitVector::ones() {
                     BitVector::ones()
+                } else if t > BitVector::ones() - t {
+                    t
                 } else {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(t.0, BitVector::ones().0)))
+                    let r = BitVector(
+                        thread_rng().sample(Uniform::new_inclusive(2 * t.0, BitVector::ones().0)),
+                    );
+                    if r == BitVector(2) * t {
+                        t
+                    } else {
+                        r
+                    }
                 }
             }
             OperandSide::Rhs => {
