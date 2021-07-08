@@ -15,6 +15,10 @@ impl BitVector {
         self.0.trailing_zeros()
     }
 
+    pub fn clz(&self) -> u32 {
+        self.0.leading_zeros()
+    }
+
     pub fn cno(&self) -> u32 {
         self.0.count_ones()
     }
