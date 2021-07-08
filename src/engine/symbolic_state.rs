@@ -258,6 +258,7 @@ where
         match self.solver.solve(&formula) {
             Ok(Some(ref assignment)) => Ok(QueryResult::Sat(formula.build_witness(assignment))),
             Ok(None) => Ok(QueryResult::UnSat),
+            Err(SolverError::UnSat) => Ok(QueryResult::UnSat),
             Err(SolverError::SatUnknown) | Err(SolverError::Timeout) => Ok(QueryResult::Unknown),
             Err(e) => Err(e),
         }

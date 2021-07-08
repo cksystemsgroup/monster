@@ -1,7 +1,7 @@
 mod bitvec;
 mod monster;
-mod smt;
 mod monsterx;
+mod smt;
 mod tritvec;
 
 #[cfg(feature = "boolector")]
@@ -54,7 +54,7 @@ pub enum SolverError {
     IoError(String),
 
     #[error("determined unsatisfiability during constraint propagation")]
-    Unsat,
+    UnSat,
 }
 
 #[derive(Debug, EnumString, EnumVariantNames, IntoStaticStr)]
