@@ -35,14 +35,20 @@ impl Solver for MonsterXSolver {
     fn solve_impl<F: Formula>(&self, formula: &F) -> Result<Option<Assignment>, SolverError> {
         let cb = compute_constant_bits(formula)?;
 
-        let ab = initialize_ab(formula);
+        let ab = initialize_ab(formula, &cb);
 
         sat(formula, ab, cb, self.timeout)
     }
 }
 
-// check if invertability condition is met
-fn is_invertable(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> bool {
+// check if invertibility condition is met considering constant bits in x
+fn is_invertable(
+    op: BVOperator,
+    s: BitVector,
+    _x: TritVector,
+    t: BitVector,
+    d: OperandSide,
+) -> bool {
     match op {
         BVOperator::Add => true,
         BVOperator::Sub => true,
@@ -97,6 +103,39 @@ fn is_invertable(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> 
     }
 }
 
+fn is_consistent<F: Formula>(
+    f: &F,
+    n: SymbolId,
+    _x: TritVector,
+    _s: TritVector,
+    _t: BitVector,
+    d: OperandSide,
+) -> bool {
+    match &f[n] {
+        Symbol::Operator(op) => match op {
+            BVOperator::Add => true,
+            BVOperator::Sub => true,
+            BVOperator::Mul => true,
+            BVOperator::Divu => match d {
+                OperandSide::Lhs => true,
+                OperandSide::Rhs => true,
+            },
+            BVOperator::Sltu => match d {
+                OperandSide::Lhs => true,
+                OperandSide::Rhs => true,
+            },
+            BVOperator::Remu => match d {
+                OperandSide::Lhs => true,
+                OperandSide::Rhs => true,
+            },
+            BVOperator::Not => true,
+            BVOperator::BitwiseAnd => true,
+            BVOperator::Equals => true,
+        },
+        _ => panic!("instruction node expected"),
+    }
+}
+
 fn compute_constant_bits<F: Formula>(formula: &F) -> Result<Vec<TritVector>, SolverError> {
     // constrains trit vectors corresponding to boolean results to <0,1>
     // initializes inputs to full domain <0..0, 1..1> and root to target value <1,1>
@@ -138,14 +177,29 @@ fn compute_constant_bits<F: Formula>(formula: &F) -> Result<Vec<TritVector>, Sol
     }
 
     let mut cb = initialize_cb(formula);
+    let mut to_be_processed = vec![false; cb.len()];
     let mut stack = vec![formula.root()];
+    to_be_processed[formula.root()] = true;
 
     // propagate until fixpoint is reached
     // a conflict during propagation yields an unsat error
     while let Some(n) = stack.pop() {
+        to_be_processed[n] = false;
         match propagate_constraint(formula, &mut cb, n) {
             Ok(None) => continue,
-            Ok(Some(updated)) => stack.extend(updated),
+            Ok(Some(updated)) => updated.iter().for_each(|&v| {
+                if v == n {
+                    formula.dependencies(n).for_each(|i| {
+                        if !to_be_processed[i] {
+                            stack.push(i);
+                            to_be_processed[i] = true;
+                        }
+                    });
+                } else if !to_be_processed[v] {
+                    stack.push(v);
+                    to_be_processed[v] = true;
+                }
+            }),
             Err(SolverError::Unsat) => return Err(SolverError::Unsat),
             _ => panic!("unexpected error during constraint propagation"),
         }
@@ -307,8 +361,8 @@ fn propagate_constraint<F: Formula>(
 }
 
 // initialize bit vectors with a consistent initial assignment to the formula
-// inputs are initialized with random values
-fn initialize_ab<F: Formula>(formula: &F) -> Vec<BitVector> {
+// inputs are initialized with random values matching constant bits
+fn initialize_ab<F: Formula>(formula: &F, cb: &[TritVector]) -> Vec<BitVector> {
     // Initialize values for all input/const nodes
     let max_id = formula
         .symbol_ids()
@@ -323,7 +377,7 @@ fn initialize_ab<F: Formula>(formula: &F) -> Vec<BitVector> {
     formula.symbol_ids().for_each(|i| {
         ab[i] = match formula[i] {
             Symbol::Constant(c) => c,
-            _ => BitVector(random::<u64>()),
+            _ => cb[i].force_cbs_onto(BitVector(random::<u64>())),
         };
     });
 
@@ -357,6 +411,7 @@ fn select<F: Formula>(
     idx: SymbolId,
     t: BitVector,
     ab: &[BitVector],
+    cb: &[TritVector],
 ) -> (SymbolId, SymbolId, OperandSide) {
     if let (lhs, Some(rhs)) = f.operands(idx) {
         fn is_constant<F: Formula>(f: &F, n: SymbolId) -> bool {
@@ -368,9 +423,9 @@ fn select<F: Formula>(
             (rhs, lhs, OperandSide::Rhs)
         } else if is_constant(f, rhs) {
             (lhs, rhs, OperandSide::Lhs)
-        } else if is_essential(f, lhs, OperandSide::Lhs, rhs, t, ab) {
+        } else if is_essential(f, lhs, OperandSide::Lhs, rhs, t, ab, cb) {
             (lhs, rhs, OperandSide::Lhs)
-        } else if is_essential(f, rhs, OperandSide::Rhs, lhs, t, ab) {
+        } else if is_essential(f, rhs, OperandSide::Rhs, lhs, t, ab, cb) {
             (rhs, lhs, OperandSide::Rhs)
         } else if random() {
             (rhs, lhs, OperandSide::Rhs)
@@ -382,7 +437,13 @@ fn select<F: Formula>(
     }
 }
 
-fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> BitVector {
+fn compute_inverse_value(
+    op: BVOperator,
+    s: BitVector,
+    _x: TritVector,
+    t: BitVector,
+    d: OperandSide,
+) -> BitVector {
     match op {
         BVOperator::Add => t - s,
         BVOperator::Sub => match d {
@@ -514,7 +575,12 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
     }
 }
 
-fn compute_consistent_value(op: BVOperator, t: BitVector, d: OperandSide) -> BitVector {
+fn compute_consistent_value(
+    op: BVOperator,
+    _x: TritVector,
+    t: BitVector,
+    d: OperandSide,
+) -> BitVector {
     match op {
         BVOperator::Add | BVOperator::Sub | BVOperator::Equals => BitVector(random::<u64>()),
         BVOperator::Mul => BitVector({
@@ -625,6 +691,7 @@ fn value<F: Formula>(
     n: SymbolId,
     ns: SymbolId,
     side: OperandSide,
+    x: TritVector,
     t: BitVector,
     ab: &[BitVector],
 ) -> BitVector {
@@ -632,10 +699,10 @@ fn value<F: Formula>(
 
     match &f[n] {
         Symbol::Operator(op) => {
-            let consistent = compute_consistent_value(*op, t, side);
+            let consistent = compute_consistent_value(*op, x, t, side);
 
-            if is_invertable(*op, s, t, side) {
-                let inverse = compute_inverse_value(*op, s, t, side);
+            if is_invertable(*op, s, x, t, side) {
+                let inverse = compute_inverse_value(*op, s, x, t, side);
                 let choose_inverse =
                     rand::thread_rng().gen_range(0.0_f64..=1.0_f64) < CHOOSE_INVERSE;
 
@@ -659,11 +726,12 @@ fn is_essential<F: Formula>(
     other: SymbolId,
     t: BitVector,
     ab: &[BitVector],
+    cb: &[TritVector],
 ) -> bool {
     let ab_nx = ab[this];
 
     match &formula[other] {
-        Symbol::Operator(op) => !is_invertable(*op, ab_nx, t, on_side.other()),
+        Symbol::Operator(op) => !is_invertable(*op, ab_nx, cb[other], t, on_side.other()),
         // TODO: not mentioned in paper => improvised. is that really true?
         Symbol::Constant(_) | Symbol::Input(_) => false,
     }
@@ -775,7 +843,7 @@ fn propagate_assignment<F: Formula>(f: &F, ab: &mut Vec<BitVector>, n: SymbolId)
 fn sat<F: Formula>(
     formula: &F,
     mut ab: Vec<BitVector>,
-    _cb: Vec<TritVector>,
+    cb: Vec<TritVector>,
     timeout_time: Duration,
 ) -> Result<Option<Assignment>, SolverError> {
     let mut iterations = 0;
@@ -816,9 +884,14 @@ fn sat<F: Formula>(
 
                         (v, nx)
                     } else {
-                        let (nx, ns, side) = select(formula, n, t, &ab);
+                        let (nx, ns, side) = select(formula, n, t, &ab, &cb);
 
-                        let v = value(formula, n, ns, side, t, &ab);
+                        if !is_consistent(formula, n, cb[nx], cb[ns], t, side) {
+                            trace!("aborting search - inconsistency found");
+                            break;
+                        }
+
+                        let v = value(formula, n, ns, side, cb[nx], t, &ab);
 
                         if log_enabled!(Level::Trace) {
                             let (lhs, rhs) = if side == OperandSide::Lhs {
@@ -957,11 +1030,12 @@ mod tests {
     ) {
         let s = BitVector(s);
         let t = BitVector(t);
+        let x = TritVector::default();
 
         match d {
             OperandSide::Lhs => {
                 assert_eq!(
-                    is_invertable(op, s, t, d),
+                    is_invertable(op, s, x, t, d),
                     result,
                     "x {:?} {:?} == {:?}   {}",
                     op,
@@ -972,7 +1046,7 @@ mod tests {
             }
             OperandSide::Rhs => {
                 assert_eq!(
-                    is_invertable(op, s, t, d),
+                    is_invertable(op, s, x, t, d),
                     result,
                     "{:?} {:?} x == {:?}   {}",
                     s,
@@ -990,8 +1064,9 @@ mod tests {
     {
         let s = BitVector(s);
         let t = BitVector(t);
+        let x = TritVector::default();
 
-        let computed = compute_inverse_value(op, s, t, d);
+        let computed = compute_inverse_value(op, s, x, t, d);
 
         // prove: computed <> s == t        where <> is the binary operator
 
@@ -1026,8 +1101,9 @@ mod tests {
         F: FnOnce(BitVector, BitVector) -> BitVector,
     {
         let t = BitVector(t);
+        let x = TritVector::default();
 
-        let computed = compute_consistent_value(op, t, d);
+        let computed = compute_consistent_value(op, x, t, d);
 
         // TODO: How to test consistent values?
         // To proof that there exists a y, we would have to compute and inverse value, which is not
@@ -1040,16 +1116,16 @@ mod tests {
             BVOperator::Add => t - computed,
             BVOperator::Mul => {
                 assert!(
-                    is_invertable(op, computed, t, d),
+                    is_invertable(op, computed, x, t, d),
                     "choose values which are invertable..."
                 );
 
-                compute_inverse_value(op, computed, t, d)
+                compute_inverse_value(op, computed, x, t, d)
             }
-            BVOperator::Sltu => compute_inverse_value(op, computed, t, d),
+            BVOperator::Sltu => compute_inverse_value(op, computed, x, t, d),
             BVOperator::Divu => {
-                assert!(is_invertable(op, computed, t, d));
-                compute_inverse_value(op, computed, t, d)
+                assert!(is_invertable(op, computed, x, t, d));
+                compute_inverse_value(op, computed, x, t, d)
             }
             _ => unimplemented!(),
         };
