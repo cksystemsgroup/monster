@@ -55,7 +55,30 @@ fn is_invertible(
             OperandSide::Lhs => x.mcb(t + s),
             OperandSide::Rhs => x.mcb(s - t),
         },
-        BVOperator::Mul => (-s | s) & t == t,
+        BVOperator::Mul => {
+            if !((-s | s) & t == t) {
+                false
+            } else if s == BitVector(0) {
+                true
+            } else if s.odd() {
+                if let Some(s_inv) = s.modinverse() {
+                    x.mcb(t * s_inv)
+                } else {
+                    false
+                }
+            } else {
+                let shift = s.ctz();
+                let y = s >> shift;
+
+                if let Some(y_inv) = y.modinverse() {
+                    let result = (t >> shift) * y_inv;
+                    let xs = TritVector::new(x.l.0 << shift, x.u.0 << shift).unwrap();
+                    xs.mcb(result << shift)
+                } else {
+                    false
+                }
+            }
+        }
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
                 if (t == BitVector::ones()) && s == BitVector(0) {
@@ -127,7 +150,15 @@ fn is_consistent<F: Formula>(
     match &f[n] {
         Symbol::Operator(op) => match op {
             BVOperator::Add | BVOperator::Sub | BVOperator::Equals => true,
-            BVOperator::Mul => true,
+            BVOperator::Mul => {
+                if t != BitVector(0) && x.u == BitVector(0) {
+                    false
+                } else if t.odd() {
+                    x.u.odd()
+                } else {
+                    t.ctz() >= x.u.ctz()
+                }
+            }
             BVOperator::Divu => match d {
                 OperandSide::Lhs => true,
                 OperandSide::Rhs => true,
@@ -462,25 +493,30 @@ fn compute_inverse_value(
             OperandSide::Rhs => s - t,
         },
         BVOperator::Mul => {
-            let y = s >> s.ctz();
-
-            let y_inv = y
-                .modinverse()
-                .expect("a modular inverse has to exist iff operator is invertible");
-
-            let result = (t >> s.ctz()) * y_inv;
-
-            let to_shift = 64 - s.ctz();
-
-            let arbitrary_bit_mask = if to_shift == 64 {
-                BitVector(0)
+            if s == BitVector(0) {
+                x.force_cbs_onto(BitVector(random::<u64>()))
             } else {
-                BitVector::ones() << to_shift
-            };
+                let y = s >> s.ctz();
 
-            let arbitrary_bits = BitVector(random::<u64>()) & arbitrary_bit_mask;
+                let y_inv = y
+                    .modinverse()
+                    .expect("a modular inverse has to exist iff operator is invertable");
 
-            result | arbitrary_bits
+                let result = (t >> s.ctz()) * y_inv;
+
+                let to_shift = 64 - s.ctz();
+
+                let arbitrary_bit_mask = if to_shift == 64 {
+                    BitVector(0)
+                } else {
+                    BitVector::ones() << to_shift
+                };
+
+                let arbitrary_bits =
+                    arbitrary_bit_mask & x.force_cbs_onto(BitVector(random::<u64>()));
+
+                result | arbitrary_bits
+            }
         }
         BVOperator::Sltu => match d {
             OperandSide::Lhs => {
@@ -597,24 +633,24 @@ fn compute_consistent_value(
         BVOperator::Add | BVOperator::Sub | BVOperator::Equals => {
             x.force_cbs_onto(BitVector(random::<u64>()))
         }
-        BVOperator::Mul => BitVector({
-            if t == BitVector(0) {
-                0
+        BVOperator::Mul => {
+            if t.odd() {
+                x.force_cbs_onto(BitVector(random::<u64>() | 1))
+            } else if t == BitVector(0) {
+                x.force_cbs_onto(BitVector(random::<u64>()))
             } else {
-                let mut r;
-                loop {
-                    r = random::<u128>();
-                    if r != 0 {
-                        break;
-                    }
+                // random ctz for x s.t x[ctz] can be set
+                let mut shift = thread_rng().sample(Uniform::new_inclusive(0, t.ctz()));
+                while x.u.bit(shift) == BitVector(0) {
+                    shift = thread_rng().sample(Uniform::new_inclusive(0, t.ctz()));
                 }
-                if t.ctz() < r.trailing_zeros() {
-                    r >>= r.trailing_zeros() - t.ctz();
-                }
-                assert!(t.ctz() >= r.trailing_zeros());
-                r as u64
+
+                let mask0 = BitVector::ones() << shift;
+                let r = BitVector(random::<u64>() | 1 << shift) & mask0;
+
+                x.force_cbs_onto(r)
             }
-        }),
+        }
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
                 if (t == BitVector::ones()) || (t == BitVector(0)) {
