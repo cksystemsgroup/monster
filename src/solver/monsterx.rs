@@ -609,7 +609,7 @@ fn compute_inverse_value(
 
                 let y_inv = y
                     .modinverse()
-                    .expect("a modular inverse has to exist iff operator is invertable");
+                    .expect("a modular inverse has to exist iff operator is invertible");
 
                 let result = (t >> s.ctz()) * y_inv;
 
@@ -1377,7 +1377,7 @@ mod tests {
     const REMU: BVOperator = BVOperator::Remu;
 
     #[test]
-    fn check_invertability_condition_for_divu() {
+    fn check_invertibility_condition_for_divu() {
         let x = (0, u64::max_value());
         test_invertibility(DIVU, x, 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
         test_invertibility(DIVU, x, 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
@@ -1392,7 +1392,7 @@ mod tests {
     }
 
     #[test]
-    fn check_invertability_condition_for_mul() {
+    fn check_invertibility_condition_for_mul() {
         let side = OperandSide::Lhs;
         let x = (0, u64::max_value());
 
@@ -1437,7 +1437,7 @@ mod tests {
     }
 
     #[test]
-    fn check_invertability_condition_for_sltu() {
+    fn check_invertibility_condition_for_sltu() {
         let mut side = OperandSide::Lhs;
         let x = (0, u64::max_value());
 
