@@ -80,17 +80,17 @@ fn is_invertible(
         },
         BVOperator::Sltu => match d {
             OperandSide::Lhs => {
-                if t != BitVector(0) {
-                    !(s == BitVector(0))
+                if t == BitVector(0) {
+                    x.u >= s
                 } else {
-                    true
+                    x.l < s
                 }
             }
             OperandSide::Rhs => {
-                if t != BitVector(0) {
-                    !(s == BitVector::ones())
+                if t == BitVector(0) {
+                    x.l <= s
                 } else {
-                    true
+                    x.u > s
                 }
             }
         },
@@ -133,8 +133,8 @@ fn is_consistent<F: Formula>(
                 OperandSide::Rhs => true,
             },
             BVOperator::Sltu => match d {
-                OperandSide::Lhs => true,
-                OperandSide::Rhs => true,
+                OperandSide::Lhs => t == BitVector(0) || x.l != BitVector::ones(),
+                OperandSide::Rhs => t == BitVector(0) || x.u != BitVector(0),
             },
             BVOperator::Remu => match d {
                 OperandSide::Lhs => true,
@@ -485,22 +485,22 @@ fn compute_inverse_value(
         BVOperator::Sltu => match d {
             OperandSide::Lhs => {
                 if t == BitVector(0) {
-                    // x<s == false; therefore we need a random x>=s
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(s.0, BitVector::ones().0)))
+                    // x<s == false; therefore we need a random x>=s with mcb
+                    x.random_sample_inclusive(s.0, u64::max_value())
+                        .expect("empty range")
                 } else {
-                    // x<s == true; therefore we need a random x<s
-                    BitVector(thread_rng().sample(Uniform::new(0, s.0)))
+                    // x<s == true; therefore we need a random x<s with mcb
+                    x.random_sample(0, s.0).expect("empty range")
                 }
             }
             OperandSide::Rhs => {
                 if t == BitVector(0) {
-                    // s<x == false; therefore we need a random x<=s
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, s.0)))
+                    // s<x == false; therefore we need a random x<=s with mcb
+                    x.random_sample_inclusive(0, s.0).expect("empty range")
                 } else {
-                    // s<x == true; therefore we need a random x>s
-                    BitVector(
-                        thread_rng().sample(Uniform::new_inclusive(s.0 + 1, BitVector::ones().0)),
-                    )
+                    // s<x == true; therefore we need a random x>s with mcb
+                    x.random_sample_inclusive(s.0 + 1, u64::max_value())
+                        .expect("empty range")
                 }
             }
         },
@@ -644,19 +644,25 @@ fn compute_consistent_value(
             OperandSide::Lhs => {
                 if t == BitVector(0) {
                     // x<s == false
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, BitVector::ones().0)))
+                    x.force_cbs_onto(BitVector(
+                        thread_rng().sample(Uniform::new_inclusive(0, BitVector::ones().0)),
+                    ))
                 } else {
                     // x<s == true
-                    BitVector(thread_rng().sample(Uniform::new(0, BitVector::ones().0)))
+                    x.random_sample_inclusive(0, u64::max_value() - 1)
+                        .expect("empty range")
                 }
             }
             OperandSide::Rhs => {
                 if t == BitVector(0) {
                     // s<x == false
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, BitVector::ones().0)))
+                    x.force_cbs_onto(BitVector(
+                        thread_rng().sample(Uniform::new_inclusive(0, BitVector::ones().0)),
+                    ))
                 } else {
                     // s<x == true
-                    BitVector(thread_rng().sample(Uniform::new(1, BitVector::ones().0)))
+                    x.random_sample_inclusive(1, u64::max_value())
+                        .expect("empty range")
                 }
             }
         },
