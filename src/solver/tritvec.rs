@@ -3,6 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use super::BitVector;
+use rand::{distributions::Uniform, thread_rng, Rng};
 use std::fmt;
 use thiserror::Error;
 
@@ -145,8 +146,28 @@ impl TritVector {
         }
     }
 
+    pub fn random_sample_inclusive(&self, l: u64, u: u64) -> Option<BitVector> {
+        let end = self.find_next_lower_match(BitVector(u)).0;
+        if l <= end {
+            let random = thread_rng().sample(Uniform::new_inclusive(l, end));
+            Some(self.find_next_higher_match(BitVector(random)))
+        } else {
+            None
+        }
+    }
+
+    pub fn random_sample(&self, l: u64, u: u64) -> Option<BitVector> {
+        let end = self.find_next_lower_match(BitVector(u - 1)).0;
+        if l <= end {
+            let random = thread_rng().sample(Uniform::new_inclusive(l, end));
+            Some(self.find_next_higher_match(BitVector(random)))
+        } else {
+            None
+        }
+    }
+
     pub fn mcb(&self, b: BitVector) -> bool {
-        (self.u & b == b) & (self.l | b == b)
+        (self.u & b == b) && (self.l | b == b)
     }
 
     pub fn force_cbs_onto(&self, b: BitVector) -> BitVector {
