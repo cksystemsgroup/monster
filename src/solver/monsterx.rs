@@ -44,8 +44,8 @@ impl Solver for MonsterXSolver {
 // check if invertibility condition is met considering constant bits in x
 fn is_invertible(
     op: BVOperator,
+    x: TritVector,
     s: BitVector,
-    _x: TritVector,
     t: BitVector,
     d: OperandSide,
 ) -> bool {
@@ -97,18 +97,28 @@ fn is_invertible(
                 !(s < t) || ((t != BitVector(0)) && t == s - BitVector(1)) || (s - t <= t)
             }
         },
-        BVOperator::Not => true,
-        BVOperator::BitwiseAnd => (t & s) == t,
-        BVOperator::Equals => true,
+        //assume bool
+        BVOperator::Not => !x.fixed() || x.l != t,
+        BVOperator::BitwiseAnd => {
+            let c = !(x.l ^ x.u);
+            (t & s == t) && (s & x.u & c == t & c)
+        }
+        BVOperator::Equals => {
+            if t == BitVector(1) {
+                x.mcb(s)
+            } else {
+                !x.fixed() || x.u != s
+            }
+        }
     }
 }
 
 fn is_consistent<F: Formula>(
     f: &F,
     n: SymbolId,
-    _x: TritVector,
+    x: TritVector,
     _s: TritVector,
-    _t: BitVector,
+    t: BitVector,
     d: OperandSide,
 ) -> bool {
     match &f[n] {
@@ -128,8 +138,8 @@ fn is_consistent<F: Formula>(
                 OperandSide::Lhs => true,
                 OperandSide::Rhs => true,
             },
-            BVOperator::Not => true,
-            BVOperator::BitwiseAnd => true,
+            BVOperator::Not => !x.fixed() || x.l != t,
+            BVOperator::BitwiseAnd => t & x.u == t,
             BVOperator::Equals => true,
         },
         _ => panic!("instruction node expected"),
@@ -439,8 +449,8 @@ fn select<F: Formula>(
 
 fn compute_inverse_value(
     op: BVOperator,
+    x: TritVector,
     s: BitVector,
-    _x: TritVector,
     t: BitVector,
     d: OperandSide,
 ) -> BitVector {
@@ -560,15 +570,15 @@ fn compute_inverse_value(
         },
         BVOperator::BitwiseAnd => BitVector(random::<u64>()) | t,
         BVOperator::Equals => {
-            if t == BitVector(0) {
+            if t == BitVector(1) {
+                s
+            } else {
                 loop {
-                    let r = BitVector(random::<u64>());
+                    let r = x.force_cbs_onto(BitVector(random::<u64>()));
                     if r != s {
                         break r;
                     }
                 }
-            } else {
-                s
             }
         }
         _ => unreachable!("unknown operator or unary operator: {:?}", op),
@@ -577,12 +587,15 @@ fn compute_inverse_value(
 
 fn compute_consistent_value(
     op: BVOperator,
-    _x: TritVector,
+    x: TritVector,
+    _s: TritVector,
     t: BitVector,
     d: OperandSide,
 ) -> BitVector {
     match op {
-        BVOperator::Add | BVOperator::Sub | BVOperator::Equals => BitVector(random::<u64>()),
+        BVOperator::Add | BVOperator::Sub | BVOperator::Equals => {
+            x.force_cbs_onto(BitVector(random::<u64>()))
+        }
         BVOperator::Mul => BitVector({
             if t == BitVector(0) {
                 0
@@ -664,7 +677,7 @@ fn compute_consistent_value(
                 }
             }
         },
-        BVOperator::BitwiseAnd => BitVector(random::<u64>()) | t,
+        BVOperator::BitwiseAnd => x.force_cbs_onto(BitVector(random::<u64>()) | t),
         _ => unreachable!("unknown operator for consistent value: {:?}", op),
     }
 }
@@ -690,19 +703,20 @@ fn value<F: Formula>(
     f: &F,
     n: SymbolId,
     ns: SymbolId,
-    side: OperandSide,
     x: TritVector,
+    side: OperandSide,
     t: BitVector,
     ab: &[BitVector],
+    cb: &[TritVector],
 ) -> BitVector {
     let s = ab[ns];
 
     match &f[n] {
         Symbol::Operator(op) => {
-            let consistent = compute_consistent_value(*op, x, t, side);
+            let consistent = compute_consistent_value(*op, x, cb[ns], t, side);
 
-            if is_invertible(*op, s, x, t, side) {
-                let inverse = compute_inverse_value(*op, s, x, t, side);
+            if is_invertible(*op, x, s, t, side) {
+                let inverse = compute_inverse_value(*op, x, s, t, side);
                 let choose_inverse =
                     rand::thread_rng().gen_range(0.0_f64..=1.0_f64) < CHOOSE_INVERSE;
 
@@ -731,7 +745,7 @@ fn is_essential<F: Formula>(
     let ab_nx = ab[this];
 
     match &formula[other] {
-        Symbol::Operator(op) => !is_invertible(*op, ab_nx, cb[other], t, on_side.other()),
+        Symbol::Operator(op) => !is_invertible(*op, cb[other], ab_nx, t, on_side.other()),
         // TODO: not mentioned in paper => improvised. is that really true?
         Symbol::Constant(_) | Symbol::Input(_) => false,
     }
@@ -891,7 +905,7 @@ fn sat<F: Formula>(
                             break;
                         }
 
-                        let v = value(formula, n, ns, side, cb[nx], t, &ab);
+                        let v = value(formula, n, ns, cb[nx], side, t, &ab, &cb);
 
                         if log_enabled!(Level::Trace) {
                             let (lhs, rhs) = if side == OperandSide::Lhs {
@@ -1022,6 +1036,7 @@ mod tests {
 
     fn test_invertibility(
         op: BVOperator,
+        x: (u64, u64),
         s: u64,
         t: u64,
         d: OperandSide,
@@ -1030,12 +1045,12 @@ mod tests {
     ) {
         let s = BitVector(s);
         let t = BitVector(t);
-        let x = TritVector::default();
+        let x = TritVector::new(x.0, x.1).expect("invalid TritVector");
 
         match d {
             OperandSide::Lhs => {
                 assert_eq!(
-                    is_invertible(op, s, x, t, d),
+                    is_invertible(op, x, s, t, d),
                     result,
                     "x {:?} {:?} == {:?}   {}",
                     op,
@@ -1046,7 +1061,7 @@ mod tests {
             }
             OperandSide::Rhs => {
                 assert_eq!(
-                    is_invertible(op, s, x, t, d),
+                    is_invertible(op, x, s, t, d),
                     result,
                     "{:?} {:?} x == {:?}   {}",
                     s,
@@ -1066,7 +1081,7 @@ mod tests {
         let t = BitVector(t);
         let x = TritVector::default();
 
-        let computed = compute_inverse_value(op, s, x, t, d);
+        let computed = compute_inverse_value(op, x, s, t, d);
 
         // prove: computed <> s == t        where <> is the binary operator
 
@@ -1102,8 +1117,9 @@ mod tests {
     {
         let t = BitVector(t);
         let x = TritVector::default();
+        let s = TritVector::default();
 
-        let computed = compute_consistent_value(op, x, t, d);
+        let computed = compute_consistent_value(op, x, s, t, d);
 
         // TODO: How to test consistent values?
         // To proof that there exists a y, we would have to compute and inverse value, which is not
@@ -1116,16 +1132,16 @@ mod tests {
             BVOperator::Add => t - computed,
             BVOperator::Mul => {
                 assert!(
-                    is_invertible(op, computed, x, t, d),
+                    is_invertible(op, x, computed, t, d),
                     "choose values which are invertible..."
                 );
 
-                compute_inverse_value(op, computed, x, t, d)
+                compute_inverse_value(op, x, computed, t, d)
             }
-            BVOperator::Sltu => compute_inverse_value(op, computed, x, t, d),
+            BVOperator::Sltu => compute_inverse_value(op, x, computed, t, d),
             BVOperator::Divu => {
-                assert!(is_invertible(op, computed, x, t, d));
-                compute_inverse_value(op, computed, x, t, d)
+                assert!(is_invertible(op, x, computed, t, d));
+                compute_inverse_value(op, x, computed, t, d)
             }
             _ => unimplemented!(),
         };
@@ -1163,26 +1179,29 @@ mod tests {
 
     #[test]
     fn check_invertability_condition_for_divu() {
-        test_invertibility(DIVU, 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
-        test_invertibility(DIVU, 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
+        let x = (0, u64::max_value());
+        test_invertibility(DIVU, x, 0b1, 0b1, OperandSide::Lhs, true, "trivial divu");
+        test_invertibility(DIVU, x, 0b1, 0b1, OperandSide::Rhs, true, "trivial divu");
 
-        test_invertibility(DIVU, 3, 2, OperandSide::Lhs, true, "x / 3 = 2");
-        test_invertibility(DIVU, 6, 2, OperandSide::Rhs, true, "6 / x = 2");
+        test_invertibility(DIVU, x, 3, 2, OperandSide::Lhs, true, "x / 3 = 2");
+        test_invertibility(DIVU, x, 6, 2, OperandSide::Rhs, true, "6 / x = 2");
 
-        test_invertibility(DIVU, 0, 2, OperandSide::Lhs, false, "x / 0 = 2");
-        test_invertibility(DIVU, 0, 2, OperandSide::Rhs, false, "0 / x = 2");
+        test_invertibility(DIVU, x, 0, 2, OperandSide::Lhs, false, "x / 0 = 2");
+        test_invertibility(DIVU, x, 0, 2, OperandSide::Rhs, false, "0 / x = 2");
 
-        test_invertibility(DIVU, 5, 6, OperandSide::Rhs, false, "5 / x = 6");
+        test_invertibility(DIVU, x, 5, 6, OperandSide::Rhs, false, "5 / x = 6");
     }
 
     #[test]
     fn check_invertability_condition_for_mul() {
         let side = OperandSide::Lhs;
+        let x = (0, u64::max_value());
 
-        test_invertibility(MUL, 0b1, 0b1, side, true, "trivial multiplication");
-        test_invertibility(MUL, 0b10, 0b1, side, false, "operand bigger than result");
+        test_invertibility(MUL, x, 0b1, 0b1, side, true, "trivial multiplication");
+        test_invertibility(MUL, x, 0b10, 0b1, side, false, "operand bigger than result");
         test_invertibility(
             MUL,
+            x,
             0b10,
             0b10,
             side,
@@ -1191,6 +1210,7 @@ mod tests {
         );
         test_invertibility(
             MUL,
+            x,
             0b10,
             0b10,
             side,
@@ -1199,6 +1219,7 @@ mod tests {
         );
         test_invertibility(
             MUL,
+            x,
             0b100,
             0b100,
             side,
@@ -1207,6 +1228,7 @@ mod tests {
         );
         test_invertibility(
             MUL,
+            x,
             0b10,
             0b1100,
             side,
@@ -1218,11 +1240,13 @@ mod tests {
     #[test]
     fn check_invertability_condition_for_sltu() {
         let mut side = OperandSide::Lhs;
+        let x = (0, u64::max_value());
 
-        test_invertibility(SLTU, 0, 1, side, false, "x < 0 == 1 FALSE");
-        test_invertibility(SLTU, 1, 1, side, true, "x < 1 == 1 TRUE");
+        test_invertibility(SLTU, x, 0, 1, side, false, "x < 0 == 1 FALSE");
+        test_invertibility(SLTU, x, 1, 1, side, true, "x < 1 == 1 TRUE");
         test_invertibility(
             SLTU,
+            x,
             u64::max_value(),
             0,
             side,
@@ -1232,10 +1256,11 @@ mod tests {
 
         side = OperandSide::Rhs;
 
-        test_invertibility(SLTU, 0, 1, side, true, "0 < x == 1 TRUE");
-        test_invertibility(SLTU, 0, 0, side, true, "0 < x == 0 TRUE");
+        test_invertibility(SLTU, x, 0, 1, side, true, "0 < x == 1 TRUE");
+        test_invertibility(SLTU, x, 0, 0, side, true, "0 < x == 0 TRUE");
         test_invertibility(
             SLTU,
+            x,
             u64::max_value(),
             1,
             side,
@@ -1244,6 +1269,7 @@ mod tests {
         );
         test_invertibility(
             SLTU,
+            x,
             u64::max_value(),
             0,
             side,
