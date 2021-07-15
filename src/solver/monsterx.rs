@@ -127,9 +127,41 @@ fn is_invertible(
             }
         },
         BVOperator::Remu => match d {
-            OperandSide::Lhs => !(s <= t),
+            OperandSide::Lhs => {
+                if !(-s) < t {
+                    false
+                } else if s == BitVector(0) || t == BitVector::ones() {
+                    x.mcb(t)
+                } else {
+                    let y_start = BitVector(0);
+                    let y_end = (BitVector::ones() - t) / s;
+                    // below computation cannot overflow due to how `y` was chosen
+                    assert!(
+                        !s.0.overflowing_mul(y_end.0).1,
+                        "multiplication overflow in REMU inverse"
+                    );
+                    assert!(
+                        !t.0.overflowing_add(y_end.0 * s.0).1,
+                        "addition overflow in REMU inverse"
+                    );
+
+                    (y_start.0..y_end.0)
+                        .into_iter()
+                        .any(|y| x.mcb(BitVector(s.0 * y + t.0)))
+                }
+            }
             OperandSide::Rhs => {
-                !(s < t) || ((t != BitVector(0)) && t == s - BitVector(1)) || (s - t <= t)
+                if (t + t - s) & s < t {
+                    false
+                } else if s == t {
+                    x.l == BitVector(0) || x.u > t
+                } else {
+                    let mut v = get_divisors(s.0 - t.0);
+                    v.push(1);
+                    v.push(s.0 - t.0);
+
+                    v.into_iter().any(|y| y > t.0 && x.mcb(BitVector(y)))
+                }
             }
         },
         //assume bool
@@ -237,8 +269,16 @@ fn is_consistent<F: Formula>(
                 OperandSide::Rhs => t == BitVector(0) || x.u != BitVector(0),
             },
             BVOperator::Remu => match d {
-                OperandSide::Lhs => true,
-                OperandSide::Rhs => true,
+                OperandSide::Lhs => {
+                    if x.mcb(t) {
+                        true
+                    } else if t <= BitVector::ones() - t {
+                        BitVector(2 * t.0 + 1) <= x.find_next_lower_match(BitVector::ones())
+                    } else {
+                        false
+                    }
+                }
+                OperandSide::Rhs => x.l >> (t / x.u).0 as u32 == x.l,
             },
             BVOperator::Not => !x.fixed() || x.l != t,
             BVOperator::BitwiseAnd => t & x.u == t,
@@ -628,35 +668,42 @@ fn compute_inverse_value(
         },
         BVOperator::Remu => match d {
             OperandSide::Lhs => {
-                let y = BitVector(
-                    thread_rng().sample(Uniform::new_inclusive(1, ((BitVector::ones() - t) / s).0)),
-                );
-                // below computation cannot overflow due to how `y` was chosen
-                assert!(
-                    !s.0.overflowing_mul(y.0).1,
-                    "multiplication overflow in REMU inverse"
-                );
-                assert!(
-                    !t.0.overflowing_add(y.0 * s.0).1,
-                    "addition overflow in REMU inverse"
-                );
-                y * s + t
+                if s == BitVector(0) || t == BitVector::ones() {
+                    t
+                } else {
+                    loop {
+                        let y = thread_rng()
+                            .sample(Uniform::new_inclusive(0, (u64::max_value() - t.0) / s.0));
+
+                        if x.mcb(BitVector(s.0 * y + t.0)) {
+                            break BitVector(s.0 * y + t.0);
+                        }
+                    }
+                }
             }
             OperandSide::Rhs => {
                 if s == t {
-                    let x = BitVector(
-                        thread_rng().sample(Uniform::new_inclusive(t.0, BitVector::ones().0)),
-                    );
-                    if x == t {
-                        BitVector(0)
+                    let mcb_range_end = x.find_next_lower_match(BitVector::ones());
+                    let random = thread_rng().sample(Uniform::new_inclusive(t.0, mcb_range_end.0));
+
+                    if random == t.0 {
+                        if x.mcb(BitVector(0)) {
+                            BitVector(0)
+                        } else {
+                            x.find_next_higher_match(BitVector(random + 1))
+                        }
                     } else {
-                        x
+                        x.find_next_higher_match(BitVector(random))
                     }
                 } else {
                     let mut v = get_divisors(s.0 - t.0);
                     v.push(1);
                     v.push(s.0 - t.0);
-                    v = v.into_iter().filter(|x| x > &t.0).collect();
+
+                    v = v
+                        .into_iter()
+                        .filter(|y| y > &t.0 && x.mcb(BitVector(*y)))
+                        .collect();
 
                     BitVector(*v.choose(&mut rand::thread_rng()).unwrap())
                 }
@@ -796,19 +843,36 @@ fn compute_consistent_value(
         },
         BVOperator::Remu => match d {
             OperandSide::Lhs => {
-                if t == BitVector::ones() {
-                    BitVector::ones()
+                if t > BitVector::ones() - t {
+                    t
                 } else {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(t.0, BitVector::ones().0)))
+                    let mcb_range_end = x.find_next_lower_match(BitVector::ones());
+                    let random =
+                        thread_rng().sample(Uniform::new_inclusive(t.0 * 2, mcb_range_end.0));
+
+                    if random == t.0 * 2 {
+                        if x.mcb(t) {
+                            t
+                        } else {
+                            x.find_next_higher_match(BitVector(random + 1))
+                        }
+                    } else {
+                        x.find_next_higher_match(BitVector(random))
+                    }
                 }
             }
             OperandSide::Rhs => {
-                if t == BitVector::ones() {
-                    BitVector(0)
+                let mcb_range_end = x.find_next_lower_match(BitVector::ones());
+                let random = thread_rng().sample(Uniform::new_inclusive(t.0, mcb_range_end.0));
+
+                if random == t.0 {
+                    if x.mcb(BitVector(0)) {
+                        BitVector(0)
+                    } else {
+                        x.find_next_higher_match(BitVector(random + 1))
+                    }
                 } else {
-                    BitVector(
-                        thread_rng().sample(Uniform::new_inclusive(t.0 + 1, BitVector::ones().0)),
-                    )
+                    x.find_next_higher_match(BitVector(random))
                 }
             }
         },
