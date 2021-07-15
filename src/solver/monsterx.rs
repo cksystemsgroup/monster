@@ -50,8 +50,11 @@ fn is_invertible(
     d: OperandSide,
 ) -> bool {
     match op {
-        BVOperator::Add => true,
-        BVOperator::Sub => true,
+        BVOperator::Add => x.mcb(t - s),
+        BVOperator::Sub => match d {
+            OperandSide::Lhs => x.mcb(t + s),
+            OperandSide::Rhs => x.mcb(s - t),
+        },
         BVOperator::Mul => (-s | s) & t == t,
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
@@ -123,8 +126,7 @@ fn is_consistent<F: Formula>(
 ) -> bool {
     match &f[n] {
         Symbol::Operator(op) => match op {
-            BVOperator::Add => true,
-            BVOperator::Sub => true,
+            BVOperator::Add | BVOperator::Sub | BVOperator::Equals => true,
             BVOperator::Mul => true,
             BVOperator::Divu => match d {
                 OperandSide::Lhs => true,
@@ -140,7 +142,6 @@ fn is_consistent<F: Formula>(
             },
             BVOperator::Not => !x.fixed() || x.l != t,
             BVOperator::BitwiseAnd => t & x.u == t,
-            BVOperator::Equals => true,
         },
         _ => panic!("instruction node expected"),
     }
