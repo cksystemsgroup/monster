@@ -81,23 +81,32 @@ fn is_invertible(
         }
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
-                if (t == BitVector::ones()) && s == BitVector(0) {
+                if (s * t) / s != t {
                     false
-                } else if (t == BitVector::ones()) && (s != BitVector(0)) && (s != BitVector(1)) {
-                    false
-                } else if (t != BitVector::ones()) && (s == BitVector(0)) {
-                    false
+                } else if s == BitVector(0) {
+                    true
+                } else if t == BitVector(0) {
+                    x.l < s
                 } else {
-                    !t.mulo(s)
+                    let range_start = t * s;
+                    let range_end = range_start.0.saturating_add(s.0 - 1);
+
+                    range_start <= x.find_next_lower_match(BitVector(range_end))
                 }
             }
             OperandSide::Rhs => {
-                if (t == s) && (t == BitVector(0)) {
+                if s / (s / t) != t {
                     false
-                } else if (t == BitVector(0)) && (s == BitVector::ones()) {
+                } else if t != BitVector::ones() && x.u == BitVector(0) {
                     false
+                } else if t != BitVector(0) || s != BitVector(0) {
+                    if s / x.u > t {
+                        false
+                    } else {
+                        s / (t + BitVector(1)) + BitVector(1) <= x.find_next_lower_match(s / t)
+                    }
                 } else {
-                    !(s < t)
+                    true
                 }
             }
         },
@@ -143,7 +152,7 @@ fn is_consistent<F: Formula>(
     f: &F,
     n: SymbolId,
     x: TritVector,
-    _s: TritVector,
+    s: TritVector,
     t: BitVector,
     d: OperandSide,
 ) -> bool {
@@ -160,8 +169,68 @@ fn is_consistent<F: Formula>(
                 }
             }
             BVOperator::Divu => match d {
-                OperandSide::Lhs => true,
-                OperandSide::Rhs => true,
+                OperandSide::Lhs => {
+                    if t == BitVector::ones() {
+                        true
+                    } else if t == BitVector(0) {
+                        x.l != BitVector::ones()
+                    } else if t == BitVector(1) {
+                        x.u >= t
+                    } else if !x.mcb(t) {
+                        if t.mulo(BitVector(2)) {
+                            false
+                        } else {
+                            //consider constant bits in s to reduce search space
+                            let s_start =
+                                s.find_next_higher_match(BitVector(x.l.0 / (t.0 + 1) + 1));
+                            let s_end = s.find_next_lower_match(x.u / t);
+
+                            let x_start = x.find_next_higher_match(s_start * t);
+                            let x_end = if s_end.mulo(t + BitVector(1))
+                                || s_end * (t + BitVector(1)) > x.u
+                            {
+                                x.u
+                            } else {
+                                x.find_next_lower_match(s_end * (t + BitVector(1)) - BitVector(1))
+                            };
+
+                            let mut cx = x_end;
+                            let mut ns;
+
+                            //continuous range
+                            if s_end >= t {
+                                let start = x.find_next_higher_match(t * t);
+                                let end = x_end;
+
+                                if start < end {
+                                    return true;
+                                }
+                                cx = x.find_next_lower_match(BitVector(t.0 * t.0 - 2));
+                            }
+
+                            while cx >= x_start {
+                                if cx / (cx / t) == t && s.mcb(cx / t) {
+                                    return true;
+                                } else {
+                                    ns = s.find_next_lower_match(cx / t);
+                                    cx = x.find_next_lower_match(BitVector(ns.0 * (t.0 + 1) - 1));
+                                }
+                            }
+                            false
+                        }
+                    } else {
+                        true
+                    }
+                }
+                OperandSide::Rhs => {
+                    if t == BitVector::ones() {
+                        x.mcb(BitVector(0)) || x.mcb(BitVector(1))
+                    } else if t.mulo(x.l) {
+                        false
+                    } else {
+                        BitVector(1) <= x.find_next_lower_match(BitVector::ones() / t)
+                    }
+                }
             },
             BVOperator::Sltu => match d {
                 OperandSide::Lhs => t == BitVector(0) || x.l != BitVector::ones(),
@@ -542,32 +611,20 @@ fn compute_inverse_value(
         },
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
-                if (t == BitVector::ones()) && (s == BitVector(1)) {
+                if s == BitVector(0) {
                     BitVector::ones()
+                } else if t == BitVector(0) {
+                    x.random_sample(x.l.0, s.0).expect("empty range")
                 } else {
-                    let range_start = t * s;
-                    if range_start.0.overflowing_add(s.0 - 1).1 {
-                        BitVector(
-                            thread_rng()
-                                .sample(Uniform::new_inclusive(range_start.0, u64::max_value())),
-                        )
-                    } else {
-                        BitVector(thread_rng().sample(Uniform::new_inclusive(
-                            range_start.0,
-                            range_start.0 + (s.0 - 1),
-                        )))
-                    }
+                    let range_start = (t * s).0;
+                    let range_end = range_start.saturating_add(s.0 - 1);
+                    x.random_sample_inclusive(range_start, range_end)
+                        .expect("empty range")
                 }
             }
-            OperandSide::Rhs => {
-                if (t == s) && t == BitVector::ones() {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, 1)))
-                } else if (t == BitVector::ones()) && (s != BitVector::ones()) {
-                    BitVector(0)
-                } else {
-                    s / t
-                }
-            }
+            OperandSide::Rhs => x
+                .random_sample_inclusive((s / (t + BitVector(1)) + BitVector(1)).0, (s / t).0)
+                .expect("empty range"),
         },
         BVOperator::Remu => match d {
             OperandSide::Lhs => {
@@ -625,7 +682,7 @@ fn compute_inverse_value(
 fn compute_consistent_value(
     op: BVOperator,
     x: TritVector,
-    _s: TritVector,
+    s: TritVector,
     t: BitVector,
     d: OperandSide,
 ) -> BitVector {
@@ -653,26 +710,61 @@ fn compute_consistent_value(
         }
         BVOperator::Divu => match d {
             OperandSide::Lhs => {
-                if (t == BitVector::ones()) || (t == BitVector(0)) {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, u64::max_value() - 1)))
+                if t == BitVector::ones() {
+                    x.force_cbs_onto(BitVector(random::<u64>()))
+                } else if t == BitVector(0) {
+                    x.random_sample(0, u64::max_value()).expect("empty range")
                 } else {
-                    let mut y = BitVector(0);
-                    while !(y != BitVector(0)) && !(y.mulo(t)) {
-                        y = BitVector(
-                            thread_rng().sample(Uniform::new_inclusive(0, u64::max_value())),
-                        );
-                    }
+                    let s_start = x.l.0 / (t.0 + 1) + 1;
+                    let s_end = s.find_next_lower_match(x.u / t);
 
-                    y * t
+                    //continuous range
+                    if s_end >= t {
+                        loop {
+                            let ry = thread_rng().sample(Uniform::new_inclusive(
+                                s.find_next_higher_match(BitVector(s_start)).0,
+                                t.0,
+                            ));
+
+                            if ry == t.0 {
+                                if let Some(v) = x.random_sample_inclusive(t.0 * t.0, x.u.0) {
+                                    break v;
+                                }
+                            } else {
+                                let y = s.find_next_lower_match(BitVector(ry));
+
+                                if let Some(v) =
+                                    x.random_sample_inclusive(t.0 * y.0, y.0 * (t.0 + 1) - 1)
+                                {
+                                    break v;
+                                }
+                            }
+                        }
+                    } else {
+                        loop {
+                            let y = s
+                                .random_sample_inclusive(s_start, x.u.0 / t.0)
+                                .expect("empty range");
+
+                            let x_end = if y.mulo(t + BitVector(1)) {
+                                x.u.0
+                            } else {
+                                y.0 * (t.0 + 1) - 1
+                            };
+
+                            if let Some(v) = x.random_sample_inclusive(t.0 * y.0, x_end) {
+                                break v;
+                            }
+                        }
+                    }
                 }
             }
             OperandSide::Rhs => {
                 if t == BitVector::ones() {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, 1)))
+                    x.random_sample_inclusive(0, 1).expect("empty range")
                 } else {
-                    BitVector(
-                        thread_rng().sample(Uniform::new_inclusive(0, u64::max_value() / t.0)),
-                    )
+                    x.random_sample_inclusive(1, (BitVector::ones() / t).0)
+                        .expect("empty range")
                 }
             }
         },
