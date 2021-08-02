@@ -94,73 +94,95 @@ impl TritVector {
         Ok(self)
     }
 
-    pub fn find_next_higher_match(&self, b: BitVector) -> BitVector {
+    pub fn find_next_higher_match(&self, b: BitVector) -> (BitVector, bool) {
         let set = self.l | b & self.u;
         let set2cl = b & !set;
         let cl2set = !b & set;
 
         if cl2set == set2cl {
-            b
+            (b, false)
         } else if cl2set > set2cl {
             // next higher value with bit i set has bits [i-1...0] cleared
             let size = 64 - cl2set.clz() - 1;
             let mask0 = BitVector::ones() << size;
             let can_cl = mask0 | self.l;
-            set & can_cl
+
+            if set & can_cl >= b {
+                (set & can_cl, false)
+            } else {
+                (set & can_cl, true)
+            }
         } else {
             // next higher value with bit i cleared has next clear bit {i+1...64} set.
             let size = 64 - set2cl.clz() - 1;
             let cl_can_set = !set & self.u;
             let left_cl_can_set = (cl_can_set >> size) << size;
             let next_to_set = left_cl_can_set.ctz();
-            let set = set & BitVector(1) << next_to_set;
-            let mask0 = BitVector::ones() << next_to_set;
+            // takes care of next_to_set = 64, next_to_set is never 0
+            let set = set | BitVector(1) << (next_to_set - 1) << 1;
+            let mask0 = BitVector::ones() << (next_to_set - 1) << 1;
             let can_cl = mask0 | self.l;
-            set & can_cl
+
+            if set & can_cl >= b {
+                (set & can_cl, false)
+            } else {
+                (set & can_cl, true)
+            }
         }
     }
 
-    pub fn find_next_lower_match(&self, b: BitVector) -> BitVector {
+    pub fn find_next_lower_match(&self, b: BitVector) -> (BitVector, bool) {
         let set = self.l | b & self.u;
         let set2cl = b & !set;
         let cl2set = !b & set;
 
         if set2cl == cl2set {
-            b
+            (b, false)
         } else if set2cl > cl2set {
             // next lower value with bit i cleared has bits [i-1...0] set
-            let size = 64 - set2cl.clz() - 1;
-            let mask1 = BitVector::ones() >> size;
+            let size = set2cl.clz() + 1;
+            let mask1 = BitVector::ones() >> (size - 1) >> 1;
             let can_set = mask1 & self.u;
-            set | can_set
+
+            if set | can_set <= b {
+                (set | can_set, false)
+            } else {
+                (set | can_set, true)
+            }
         } else {
             // next lower value with bit i set has next set bit {i+1...64} cleared.
             let size = 64 - cl2set.clz() - 1;
             let set_can_clear = set & !self.l;
             let left_set_can_clear = (set_can_clear >> size) << size;
             let next_to_clear = left_set_can_clear.ctz();
-            let set = set & !(BitVector(1) << next_to_clear);
+            // takes care of next_to_clear = 64, next_to_clear is never 0
+            let set = set & !(BitVector(1) << (next_to_clear - 1) << 1);
             let mask1 = BitVector::ones() >> (64 - next_to_clear);
             let can_set = mask1 & self.u;
-            set | can_set
+
+            if set | can_set <= b {
+                (set | can_set, false)
+            } else {
+                (set | can_set, true)
+            }
         }
     }
 
     pub fn random_sample_inclusive(&self, l: u64, u: u64) -> Option<BitVector> {
-        let end = self.find_next_lower_match(BitVector(u)).0;
-        if l <= end {
-            let random = thread_rng().sample(Uniform::new_inclusive(l, end));
-            Some(self.find_next_higher_match(BitVector(random)))
+        let (end, wrap) = self.find_next_lower_match(BitVector(u));
+        if !wrap && l <= end.0 {
+            let random = thread_rng().sample(Uniform::new_inclusive(l, end.0));
+            Some(self.find_next_higher_match(BitVector(random)).0)
         } else {
             None
         }
     }
 
     pub fn random_sample(&self, l: u64, u: u64) -> Option<BitVector> {
-        let end = self.find_next_lower_match(BitVector(u - 1)).0;
-        if l <= end {
-            let random = thread_rng().sample(Uniform::new_inclusive(l, end));
-            Some(self.find_next_higher_match(BitVector(random)))
+        let (end, wrap) = self.find_next_lower_match(BitVector(u - 1));
+        if !wrap && l <= end.0 {
+            let random = thread_rng().sample(Uniform::new_inclusive(l, end.0));
+            Some(self.find_next_higher_match(BitVector(random)).0)
         } else {
             None
         }
@@ -517,7 +539,8 @@ impl TritVector {
     }
 
     fn constrain_gte(self, y: TritVector) -> CPResult<(TritVector, TritVector)> {
-        y.constrain_ineq(self, |x, y| x > y)
+        let (y, x) = y.constrain_ineq(self, |x, y| x > y)?;
+        Ok((x, y))
     }
 
     fn constrain_ineq<F>(self, mut y: TritVector, f: F) -> CPResult<(TritVector, TritVector)>
@@ -975,14 +998,49 @@ mod tests {
     fn test_find_next() {
         let x = TritVector::new(0b010, 0b111).expect("new TritVector");
 
-        assert_eq!(x.find_next_higher_match(BitVector(0)), BitVector(2));
-        assert_eq!(x.find_next_higher_match(BitVector(2)), BitVector(2));
-        assert_eq!(x.find_next_higher_match(BitVector(4)), BitVector(6));
-        assert_eq!(x.find_next_higher_match(BitVector(5)), BitVector(6));
+        assert_eq!(x.find_next_higher_match(BitVector(0)).0, BitVector(2));
+        assert_eq!(x.find_next_higher_match(BitVector(2)).0, BitVector(2));
+        assert_eq!(x.find_next_higher_match(BitVector(4)).0, BitVector(6));
+        assert_eq!(x.find_next_higher_match(BitVector(5)).0, BitVector(6));
 
-        assert_eq!(x.find_next_lower_match(BitVector(8)), BitVector(7));
-        assert_eq!(x.find_next_lower_match(BitVector(7)), BitVector(7));
-        assert_eq!(x.find_next_lower_match(BitVector(5)), BitVector(3));
-        assert_eq!(x.find_next_lower_match(BitVector(4)), BitVector(3));
+        assert_eq!(x.find_next_lower_match(BitVector(8)).0, BitVector(7));
+        assert_eq!(x.find_next_lower_match(BitVector(7)).0, BitVector(7));
+        assert_eq!(x.find_next_lower_match(BitVector(5)).0, BitVector(3));
+        assert_eq!(x.find_next_lower_match(BitVector(4)).0, BitVector(3));
+
+        let x = TritVector::new(0b0, 0b1110).expect("new TritVector");
+        assert_eq!(
+            x.find_next_lower_match(BitVector(0b101)).0,
+            BitVector(0b100)
+        );
+        assert_eq!(
+            x.find_next_higher_match(BitVector(0b101)).0,
+            BitVector(0b110)
+        );
+
+        let x = TritVector::new(0b1, 0b1111).expect("new TritVector");
+        assert_eq!(
+            x.find_next_lower_match(BitVector(0b100)).0,
+            BitVector(0b011)
+        );
+        assert_eq!(
+            x.find_next_lower_match(BitVector(0b110)).0,
+            BitVector(0b101)
+        );
+        assert_eq!(
+            x.find_next_higher_match(BitVector(0b100)).0,
+            BitVector(0b101)
+        );
+
+        let x = TritVector::new(0b10, u64::max_value() - 1).expect("new TritVector");
+        assert_eq!(
+            x.find_next_lower_match(BitVector(1)).0,
+            BitVector(u64::max_value() - 1)
+        );
+        assert_eq!(
+            x.find_next_lower_match(BitVector(0)).0,
+            BitVector(u64::max_value() - 1)
+        );
+        assert_eq!(x.find_next_higher_match(BitVector::ones()).0, BitVector(2));
     }
 }

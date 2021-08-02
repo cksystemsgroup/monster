@@ -1,4 +1,5 @@
 #![allow(clippy::many_single_char_names)]
+#![allow(clippy::too_many_arguments)]
 #![allow(clippy::if_same_then_else)]
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
@@ -33,11 +34,13 @@ impl Solver for MonsterXSolver {
     }
 
     fn solve_impl<F: Formula>(&self, formula: &F) -> Result<Option<Assignment>, SolverError> {
-        let cb = compute_constant_bits(formula)?;
+        let cb = time_info!("computing constant bits", {
+            compute_constant_bits(formula)?
+        });
 
         let ab = initialize_ab(formula, &cb);
 
-        sat(formula, ab, cb, self.timeout)
+        time_info!("solving formula", { sat(formula, ab, cb, self.timeout) })
     }
 }
 
@@ -89,9 +92,10 @@ fn is_invertible(
                     x.l < s
                 } else {
                     let range_start = t * s;
-                    let range_end = range_start.0.saturating_add(s.0 - 1);
+                    let range_end = BitVector(range_start.0.saturating_add(s.0 - 1));
+                    let (mcb_range_end, wrap) = x.find_next_lower_match(range_end);
 
-                    range_start <= x.find_next_lower_match(BitVector(range_end))
+                    !wrap && range_start <= mcb_range_end
                 }
             }
             OperandSide::Rhs => {
@@ -103,7 +107,9 @@ fn is_invertible(
                     if s / x.u > t {
                         false
                     } else {
-                        s / (t + BitVector(1)) + BitVector(1) <= x.find_next_lower_match(s / t)
+                        let (mcb_range_end, wrap) = x.find_next_lower_match(s / t);
+
+                        !wrap && s / (t + BitVector(1)) + BitVector(1) <= mcb_range_end
                     }
                 } else {
                     true
@@ -145,7 +151,7 @@ fn is_invertible(
                         "addition overflow in REMU inverse"
                     );
 
-                    (y_start.0..y_end.0)
+                    (y_start.0..=y_end.0)
                         .into_iter()
                         .any(|y| x.mcb(BitVector(s.0 * y + t.0)))
                 }
@@ -208,50 +214,62 @@ fn is_consistent<F: Formula>(
                         x.l != BitVector::ones()
                     } else if t == BitVector(1) {
                         x.u >= t
-                    } else if !x.mcb(t) {
-                        if t.mulo(BitVector(2)) {
-                            false
-                        } else {
-                            //consider constant bits in s to reduce search space
-                            let s_start =
-                                s.find_next_higher_match(BitVector(x.l.0 / (t.0 + 1) + 1));
-                            let s_end = s.find_next_lower_match(x.u / t);
+                    } else if x.mcb(t) && s.mcb(BitVector(1)) {
+                        true
+                    } else if t.mulo(BitVector(2)) {
+                        false
+                    } else {
+                        //consider constant bits in s to reduce search space
+                        let (s_start, sw_start) =
+                            s.find_next_higher_match(BitVector(x.l.0 / (t.0 + 1) + 1));
+                        let (s_end, sw_end) = s.find_next_lower_match(x.u / t);
 
-                            let x_start = x.find_next_higher_match(s_start * t);
-                            let x_end = if s_end.mulo(t + BitVector(1))
-                                || s_end * (t + BitVector(1)) > x.u
-                            {
-                                x.u
+                        let (x_start, xw_start) = x.find_next_higher_match(s_start * t);
+                        let (x_end, xw_end) =
+                            if s_end.mulo(t + BitVector(1)) || s_end * (t + BitVector(1)) > x.u {
+                                (x.u, false)
                             } else {
                                 x.find_next_lower_match(s_end * (t + BitVector(1)) - BitVector(1))
                             };
 
-                            let mut cx = x_end;
-                            let mut ns;
-
-                            //continuous range
-                            if s_end >= t {
-                                let start = x.find_next_higher_match(t * t);
-                                let end = x_end;
-
-                                if start < end {
-                                    return true;
-                                }
-                                cx = x.find_next_lower_match(BitVector(t.0 * t.0 - 2));
-                            }
-
-                            while cx >= x_start {
-                                if cx / (cx / t) == t && s.mcb(cx / t) {
-                                    return true;
-                                } else {
-                                    ns = s.find_next_lower_match(cx / t);
-                                    cx = x.find_next_lower_match(BitVector(ns.0 * (t.0 + 1) - 1));
-                                }
-                            }
-                            false
+                        if sw_start || sw_end || xw_start || xw_end {
+                            return false;
                         }
-                    } else {
-                        true
+
+                        let mut cx = x_end;
+
+                        //continuous range
+                        if s_end >= t {
+                            let (start, wrap) = x.find_next_higher_match(t * t);
+                            let end = x_end;
+
+                            if !wrap && start <= end {
+                                return true;
+                            }
+                            let (tx, wrap) = x.find_next_lower_match(BitVector(t.0 * t.0 - 2));
+
+                            if wrap {
+                                return false;
+                            }
+                            cx = tx;
+                        }
+
+                        while cx >= x_start {
+                            if cx / (cx / t) == t && s.mcb(cx / t) {
+                                return true;
+                            } else {
+                                let (ts, s_wrap) = s.find_next_lower_match(cx / t);
+                                let (tx, x_wrap) =
+                                    x.find_next_lower_match(BitVector(ts.0 * (t.0 + 1) - 1));
+
+                                if s_wrap || x_wrap {
+                                    return false;
+                                }
+
+                                cx = tx;
+                            }
+                        }
+                        false
                     }
                 }
                 OperandSide::Rhs => {
@@ -260,7 +278,8 @@ fn is_consistent<F: Formula>(
                     } else if t.mulo(x.l) {
                         false
                     } else {
-                        BitVector(1) <= x.find_next_lower_match(BitVector::ones() / t)
+                        let (mcb_range_end, wrap) = x.find_next_lower_match(BitVector::ones() / t);
+                        !wrap && BitVector(1) <= mcb_range_end
                     }
                 }
             },
@@ -273,7 +292,7 @@ fn is_consistent<F: Formula>(
                     if x.mcb(t) {
                         true
                     } else if t <= BitVector::ones() - t {
-                        BitVector(2 * t.0 + 1) <= x.find_next_lower_match(BitVector::ones())
+                        BitVector(2 * t.0 + 1) <= x.find_next_lower_match(BitVector::ones()).0
                     } else {
                         false
                     }
@@ -321,7 +340,7 @@ fn compute_constant_bits<F: Formula>(formula: &F) -> Result<Vec<TritVector>, Sol
                 .symbol_ids()
                 .filter(|i| matches!(formula[*i], Symbol::Input(_)))
                 .for_each(|i| {
-                    trace!("initialize: x{} <- <{}, {}>", i, cb[i].l.0, cb[i].u.0);
+                    trace!("initialize: x{} <- <{:#x}, {:#x}>", i, cb[i].l.0, cb[i].u.0);
                 });
         }
         cb
@@ -382,10 +401,11 @@ fn propagate_constraint<F: Formula>(
                     BVOperator::Sub => z.constrain_sub(x, y),
                     BVOperator::Mul => z.constrain_mul(x, y, true),
                     BVOperator::Divu => z.constrain_divu(x, y),
+                    BVOperator::Remu => z.constrain_remu(x, y),
                     BVOperator::BitwiseAnd => z.constrain_and(x, y),
                     BVOperator::Sltu => z.constrain_reif_sltu(x, y),
                     BVOperator::Equals => z.constrain_reif_eq(x, y),
-                    _ => Ok((x, y, z)),
+                    _ => unreachable!("unknown binary operator: {:?}", op),
                 },
                 _ => unreachable!("unexpected symbol: {:?}", f[n]),
             }
@@ -574,9 +594,9 @@ fn select<F: Formula>(
             (rhs, lhs, OperandSide::Rhs)
         } else if is_constant(f, rhs) {
             (lhs, rhs, OperandSide::Lhs)
-        } else if is_essential(f, lhs, OperandSide::Lhs, rhs, t, ab, cb) {
+        } else if is_essential(f, idx, lhs, OperandSide::Lhs, rhs, t, ab, cb) {
             (lhs, rhs, OperandSide::Lhs)
-        } else if is_essential(f, rhs, OperandSide::Rhs, lhs, t, ab, cb) {
+        } else if is_essential(f, idx, rhs, OperandSide::Rhs, lhs, t, ab, cb) {
             (rhs, lhs, OperandSide::Rhs)
         } else if random() {
             (rhs, lhs, OperandSide::Rhs)
@@ -683,17 +703,22 @@ fn compute_inverse_value(
             }
             OperandSide::Rhs => {
                 if s == t {
-                    let mcb_range_end = x.find_next_lower_match(BitVector::ones());
-                    let random = thread_rng().sample(Uniform::new_inclusive(t.0, mcb_range_end.0));
-
-                    if random == t.0 {
-                        if x.mcb(BitVector(0)) {
-                            BitVector(0)
-                        } else {
-                            x.find_next_higher_match(BitVector(random + 1))
-                        }
+                    if x.u < t {
+                        BitVector(0)
                     } else {
-                        x.find_next_higher_match(BitVector(random))
+                        let mcb_range_end = x.find_next_lower_match(BitVector::ones()).0;
+                        let random =
+                            thread_rng().sample(Uniform::new_inclusive(t.0, mcb_range_end.0));
+
+                        if random == t.0 {
+                            if x.mcb(BitVector(0)) {
+                                BitVector(0)
+                            } else {
+                                x.find_next_higher_match(BitVector(random + 1)).0
+                            }
+                        } else {
+                            x.find_next_higher_match(BitVector(random)).0
+                        }
                     }
                 } else {
                     let mut v = get_divisors(s.0 - t.0);
@@ -709,7 +734,7 @@ fn compute_inverse_value(
                 }
             }
         },
-        BVOperator::BitwiseAnd => BitVector(random::<u64>()) | t,
+        BVOperator::BitwiseAnd => BitVector(random::<u64>()) & !s | t,
         BVOperator::Equals => {
             if t == BitVector(1) {
                 s
@@ -763,22 +788,22 @@ fn compute_consistent_value(
                     x.random_sample(0, u64::max_value()).expect("empty range")
                 } else {
                     let s_start = x.l.0 / (t.0 + 1) + 1;
-                    let s_end = s.find_next_lower_match(x.u / t);
+                    let s_end = s.find_next_lower_match(x.u / t).0;
 
                     //continuous range
                     if s_end >= t {
                         loop {
                             let ry = thread_rng().sample(Uniform::new_inclusive(
-                                s.find_next_higher_match(BitVector(s_start)).0,
-                                t.0,
+                                s.find_next_higher_match(BitVector(s_start)).0 .0,
+                                s_end.0,
                             ));
 
-                            if ry == t.0 {
+                            if ry >= t.0 {
                                 if let Some(v) = x.random_sample_inclusive(t.0 * t.0, x.u.0) {
                                     break v;
                                 }
                             } else {
-                                let y = s.find_next_lower_match(BitVector(ry));
+                                let y = s.find_next_lower_match(BitVector(ry)).0;
 
                                 if let Some(v) =
                                     x.random_sample_inclusive(t.0 * y.0, y.0 * (t.0 + 1) - 1)
@@ -846,7 +871,7 @@ fn compute_consistent_value(
                 if t > BitVector::ones() - t {
                     t
                 } else {
-                    let mcb_range_end = x.find_next_lower_match(BitVector::ones());
+                    let mcb_range_end = x.find_next_lower_match(BitVector::ones()).0;
                     let random =
                         thread_rng().sample(Uniform::new_inclusive(t.0 * 2, mcb_range_end.0));
 
@@ -854,25 +879,25 @@ fn compute_consistent_value(
                         if x.mcb(t) {
                             t
                         } else {
-                            x.find_next_higher_match(BitVector(random + 1))
+                            x.find_next_higher_match(BitVector(random + 1)).0
                         }
                     } else {
-                        x.find_next_higher_match(BitVector(random))
+                        x.find_next_higher_match(BitVector(random)).0
                     }
                 }
             }
             OperandSide::Rhs => {
-                let mcb_range_end = x.find_next_lower_match(BitVector::ones());
+                let mcb_range_end = x.find_next_lower_match(BitVector::ones()).0;
                 let random = thread_rng().sample(Uniform::new_inclusive(t.0, mcb_range_end.0));
 
                 if random == t.0 {
                     if x.mcb(BitVector(0)) {
                         BitVector(0)
                     } else {
-                        x.find_next_higher_match(BitVector(random + 1))
+                        x.find_next_higher_match(BitVector(random + 1)).0
                     }
                 } else {
-                    x.find_next_higher_match(BitVector(random))
+                    x.find_next_higher_match(BitVector(random)).0
                 }
             }
         },
@@ -912,20 +937,17 @@ fn value<F: Formula>(
 
     match &f[n] {
         Symbol::Operator(op) => {
-            let consistent = compute_consistent_value(*op, x, cb[ns], t, side);
-
             if is_invertible(*op, x, s, t, side) {
-                let inverse = compute_inverse_value(*op, x, s, t, side);
                 let choose_inverse =
                     rand::thread_rng().gen_range(0.0_f64..=1.0_f64) < CHOOSE_INVERSE;
 
                 if choose_inverse {
-                    inverse
+                    compute_inverse_value(*op, x, s, t, side)
                 } else {
-                    consistent
+                    compute_consistent_value(*op, x, cb[ns], t, side)
                 }
             } else {
-                consistent
+                compute_consistent_value(*op, x, cb[ns], t, side)
             }
         }
         _ => unimplemented!(),
@@ -934,6 +956,7 @@ fn value<F: Formula>(
 
 fn is_essential<F: Formula>(
     formula: &F,
+    n: SymbolId,
     this: SymbolId,
     on_side: OperandSide,
     other: SymbolId,
@@ -943,7 +966,7 @@ fn is_essential<F: Formula>(
 ) -> bool {
     let ab_nx = ab[this];
 
-    match &formula[other] {
+    match &formula[n] {
         Symbol::Operator(op) => !is_invertible(*op, cb[other], ab_nx, t, on_side.other()),
         // TODO: not mentioned in paper => improvised. is that really true?
         Symbol::Constant(_) | Symbol::Input(_) => false,
@@ -1138,7 +1161,9 @@ fn sat<F: Formula>(
             n = nx;
         }
 
-        update_assignment(formula, &mut ab, n, t);
+        if matches!(formula[n], Symbol::Input(_)) {
+            update_assignment(formula, &mut ab, n, t);
+        }
     }
 
     let assignment: Assignment = formula.symbol_ids().map(|i| (i, ab[i])).collect();
@@ -1272,13 +1297,19 @@ mod tests {
         }
     }
 
-    fn test_inverse_value_computation<F>(op: BVOperator, s: u64, t: u64, d: OperandSide, f: F)
-    where
+    fn test_inverse_value_computation<F>(
+        op: BVOperator,
+        x: (u64, u64),
+        s: u64,
+        t: u64,
+        d: OperandSide,
+        f: F,
+    ) where
         F: FnOnce(BitVector, BitVector) -> BitVector,
     {
         let s = BitVector(s);
         let t = BitVector(t);
-        let x = TritVector::default();
+        let x = TritVector::new(x.0, x.1).expect("invalid TritVector");
 
         let computed = compute_inverse_value(op, x, s, t, d);
 
@@ -1371,10 +1402,921 @@ mod tests {
     // TODO: add tests for ADD
     // TODO: add tests for SUB
 
+    const EQUALS: BVOperator = BVOperator::Equals;
+    const AND: BVOperator = BVOperator::BitwiseAnd;
+    const ADD: BVOperator = BVOperator::Add;
+    const SUB: BVOperator = BVOperator::Sub;
     const MUL: BVOperator = BVOperator::Mul;
     const SLTU: BVOperator = BVOperator::Sltu;
     const DIVU: BVOperator = BVOperator::Divu;
     const REMU: BVOperator = BVOperator::Remu;
+
+    #[test]
+    fn check_invertibility_condition_for_not_with_cb() {
+        fn test_invertibility(t: u64, x: (u64, u64), result: bool) {
+            let x = TritVector::new(x.0, x.1).expect("invalid Tritvector");
+            let t = BitVector(t);
+            assert_eq!(
+                is_invertible(BVOperator::Not, x, BitVector(0), t, OperandSide::Lhs),
+                result,
+                "  !x == {:?} ",
+                t
+            );
+        }
+
+        test_invertibility(0b1, (0b0, 0b1), true);
+        test_invertibility(0b1, (0b0, 0b0), true);
+        test_invertibility(0b1, (0b1, 0b1), false);
+
+        test_invertibility(0b0, (0b0, 0b1), true);
+        test_invertibility(0b0, (0b1, 0b1), true);
+        test_invertibility(0b0, (0b0, 0b0), false);
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_equals_with_cb() {
+        let side = OperandSide::Lhs;
+        test_invertibility(EQUALS, (0b0, 0b111), 0b101, 0b0, side, true, "x not fixed");
+        test_invertibility(EQUALS, (0b100, 0b100), 0b101, 0b0, side, true, "s != x");
+        test_invertibility(EQUALS, (0b101, 0b101), 0b101, 0b0, side, false, "s == x");
+
+        test_invertibility(EQUALS, (0b100, 0b111), 0b101, 0b1, side, true, "x mcb in s");
+        test_invertibility(
+            EQUALS,
+            (0b001, 0b011),
+            0b101,
+            0b1,
+            side,
+            false,
+            "x !mcb in s",
+        );
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_and_with_cb() {
+        let side = OperandSide::Lhs;
+        test_invertibility(
+            AND,
+            (0b0, 0b111),
+            0b101,
+            0b100,
+            side,
+            true,
+            "3 lsb not fixed",
+        );
+        test_invertibility(
+            AND,
+            (0b110, 0b111),
+            0b101,
+            0b100,
+            side,
+            true,
+            "fixed 11 bits MATCH",
+        );
+        test_invertibility(
+            AND,
+            (0b000, 0b100),
+            0b101,
+            0b100,
+            side,
+            true,
+            "fixed 00 bits MATCH",
+        );
+        test_invertibility(
+            AND,
+            (0b000, 0b011),
+            0b101,
+            0b100,
+            side,
+            false,
+            "fixed 0 bit inMATCH",
+        );
+        test_invertibility(
+            AND,
+            (0b001, 0b111),
+            0b101,
+            0b100,
+            side,
+            false,
+            "fixed 1 bit inMATCH",
+        );
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_sltu_with_cb() {
+        let mut side = OperandSide::Lhs;
+        test_invertibility(SLTU, (0b0, 0b101), 0b101, 0b0, side, true, "x.u >= s");
+        test_invertibility(SLTU, (0b0, 0b100), 0b101, 0b0, side, false, "x.u < s");
+
+        test_invertibility(SLTU, (0b1, 0b111), 0b101, 0b1, side, true, "x.l < s");
+        test_invertibility(SLTU, (0b101, 0b111), 0b101, 0b1, side, false, "x.l >= s");
+
+        side = OperandSide::Rhs;
+        test_invertibility(SLTU, (0b101, 0b111), 0b101, 0b0, side, true, "x.l <= s");
+        test_invertibility(SLTU, (0b111, 0b111), 0b101, 0b0, side, false, "x.l > s");
+
+        test_invertibility(SLTU, (0b1, 0b111), 0b101, 0b1, side, true, "x.u > s");
+        test_invertibility(SLTU, (0b0, 0b101), 0b101, 0b1, side, false, "x.u <= s");
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_add_with_cb() {
+        let side = OperandSide::Lhs;
+        // -4 = <*..*0*1>, -5 == <*..*0*0>
+        test_invertibility(
+            ADD,
+            (0b0, 0b010),
+            0b101,
+            0b111,
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+        test_invertibility(
+            ADD,
+            (0b1, u64::max_value() - 4),
+            0b101,
+            0b0,
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+        test_invertibility(
+            ADD,
+            (0b0, u64::max_value() - 5),
+            0b101,
+            u64::max_value(),
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+        test_invertibility(
+            ADD,
+            (0b1, 0b011),
+            0b101,
+            0b111,
+            side,
+            false,
+            "fixed bit NO MATCH",
+        );
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_sub_with_cb() {
+        let mut side = OperandSide::Lhs;
+
+        test_invertibility(
+            SUB,
+            (0b100, 0b110),
+            0b101,
+            0b1,
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+        test_invertibility(
+            SUB,
+            (0b100, u64::max_value() - 1),
+            0b101,
+            u64::max_value(),
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+
+        test_invertibility(
+            SUB,
+            (0b101, 0b111),
+            0b101,
+            0b1,
+            side,
+            false,
+            "fixed bit NO MATCH",
+        );
+        test_invertibility(
+            SUB,
+            (0b101, u64::max_value()),
+            0b101,
+            u64::max_value(),
+            side,
+            false,
+            "fixed bit NO MATCH",
+        );
+
+        side = OperandSide::Rhs;
+
+        test_invertibility(
+            SUB,
+            (0b0, 0b010),
+            0b101,
+            0b101,
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+        test_invertibility(
+            SUB,
+            (0b100, u64::max_value() - 1),
+            0b101,
+            u64::max_value(),
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+
+        test_invertibility(
+            SUB,
+            (0b1, 0b011),
+            0b101,
+            0b101,
+            side,
+            false,
+            "fixed bit NO MATCH",
+        );
+        test_invertibility(
+            SUB,
+            (0b101, u64::max_value()),
+            0b101,
+            u64::max_value(),
+            side,
+            false,
+            "fixed bit NO MATCH",
+        );
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_mul_with_cb() {
+        let side = OperandSide::Lhs;
+        test_invertibility(MUL, (0b10, 0b110), 0b0, 0b0, side, true, "s == 0");
+        test_invertibility(
+            MUL,
+            (0b100, 0b111),
+            0b10,
+            0b1100,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b1, 0b111),
+            0b101,
+            0b1111,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b10, u64::max_value()),
+            0b10,
+            u64::max_value() - 3,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b10, u64::max_value()),
+            0b101,
+            u64::max_value() - 4,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b0, u64::max_value()),
+            0b11,
+            u64::max_value() / 2 + 1,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (u64::max_value() / 2 + 1, u64::max_value()),
+            0b100,
+            0,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+
+        test_invertibility(
+            MUL,
+            (0b100, 0b101),
+            0b10,
+            0b1100,
+            side,
+            false,
+            "fixed 0 bit NO MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b1, 0b101),
+            0b101,
+            0b1111,
+            side,
+            false,
+            "fixed 0 bit NO MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b10, u64::max_value() - 8),
+            0b10,
+            u64::max_value() - 3,
+            side,
+            false,
+            "fixed bits NO MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b10, u64::max_value() - 8),
+            0b101,
+            u64::max_value() - 4,
+            side,
+            false,
+            "fixed bits NO MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (0b11010, u64::max_value() - 5),
+            0b11,
+            u64::max_value() / 2 + 1,
+            side,
+            false,
+            "fixed bits NO MATCH",
+        );
+        test_invertibility(
+            MUL,
+            (u64::max_value() / 2 - 5, u64::max_value() - 5),
+            0b100,
+            0,
+            side,
+            false,
+            "fixed bits NO MATCH",
+        );
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_remu_with_cb() {
+        let mut side = OperandSide::Lhs;
+
+        test_invertibility(
+            REMU,
+            (0b100, u64::max_value() - 18),
+            0b0,
+            0b1101,
+            side,
+            true,
+            "x and t MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b100, u64::max_value()),
+            0b0,
+            u64::max_value(),
+            side,
+            true,
+            "x and t MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b1, u64::max_value() - 8),
+            0b110,
+            0b101,
+            side,
+            true,
+            "fixed bits (odd lsb) MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b1000, u64::max_value() - 1),
+            0b1100,
+            0b100,
+            side,
+            true,
+            "fixed bits (even lsb) MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b100, u64::max_value() - 11),
+            u64::max_value() / 2,
+            0b101,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+
+        test_invertibility(
+            REMU,
+            (0b100, u64::max_value() - 8),
+            0b0,
+            0b1101,
+            side,
+            false,
+            "x and t NO MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b100, u64::max_value() - 3),
+            0b0,
+            u64::max_value(),
+            side,
+            false,
+            "x and t NO MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b0, u64::max_value() - 1),
+            u64::max_value() / 8 + 1,
+            u64::max_value() / 8 - 16,
+            side,
+            false,
+            "fixed lsb NO MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b1, u64::max_value()),
+            u64::max_value() / 8 + 1,
+            u64::max_value() / 8 - 17,
+            side,
+            false,
+            "fixed lsb NO MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b1, u64::max_value() - 10),
+            u64::max_value() / 2,
+            0b101,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+
+        side = OperandSide::Rhs;
+
+        test_invertibility(
+            REMU,
+            (0b0, 0b10),
+            0b101,
+            0b101,
+            side,
+            true,
+            "s == t, x and 0 MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b1, 0b111),
+            0b101,
+            0b101,
+            side,
+            true,
+            "s == t, x > t MATCH exists",
+        );
+
+        test_invertibility(
+            REMU,
+            (0b101, 0b10111),
+            0b1010,
+            0b11,
+            side,
+            true,
+            "10 % x == 3, x and 7 MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b10, 0b111),
+            0b11101,
+            0b101,
+            side,
+            true,
+            "29 % x == 5, x and 6 MATCH",
+        );
+
+        test_invertibility(
+            REMU,
+            (0b1, 0b101),
+            0b101,
+            0b101,
+            side,
+            false,
+            "s == t, x and 0 DON'T MATCH, x <= t",
+        );
+
+        test_invertibility(
+            REMU,
+            (0b101, 0b10101),
+            0b1010,
+            0b11,
+            side,
+            false,
+            "10 % x == 3, x and 7 DON'T MATCH",
+        );
+        test_invertibility(
+            REMU,
+            (0b1010, 0b11111),
+            0b11101,
+            0b101,
+            side,
+            false,
+            "29 % x == 5, x and 6,8,12,24 DON'T MATCH",
+        );
+    }
+
+    #[test]
+    fn check_invertibility_condition_for_divu_with_cb() {
+        let mut side = OperandSide::Lhs;
+
+        test_invertibility(
+            DIVU,
+            (0b10, 0b1111),
+            0b101,
+            0b0,
+            side,
+            true,
+            "fixed bit MATCH, x < t == TRUE",
+        );
+        test_invertibility(
+            DIVU,
+            (0b1, 0b1011),
+            0b101,
+            0b10,
+            side,
+            true,
+            "fixed bit MATCH",
+        );
+        test_invertibility(
+            DIVU,
+            (0b11, u64::max_value()),
+            0b101,
+            u64::max_value() / 5,
+            side,
+            true,
+            "fixed bits MATCH, x == ones",
+        );
+        test_invertibility(
+            DIVU,
+            (0b1, u64::max_value() - 2),
+            0b110,
+            u64::max_value() / 6,
+            side,
+            true,
+            "fixed bits MATCH",
+        );
+
+        test_invertibility(
+            DIVU,
+            (0b101, 0b1111),
+            0b101,
+            0b0,
+            side,
+            false,
+            "fixed bits DON'T MATCH",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, u64::max_value() - 8),
+            0b101,
+            0b10,
+            side,
+            false,
+            "fixed bit DOESN'T MATCH",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, u64::max_value() - 2),
+            0b101,
+            u64::max_value() / 5,
+            side,
+            false,
+            "fixed bit DOESN'T MATCH",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, u64::max_value() - 4),
+            0b110,
+            u64::max_value() / 6,
+            side,
+            false,
+            "fixed bits MATCH",
+        );
+
+        side = OperandSide::Rhs;
+
+        test_invertibility(DIVU, (0b10, 0b111), 0b0, 0b0, side, true, "t == s == 0");
+        test_invertibility(
+            DIVU,
+            (0b10, 0b111),
+            0b101,
+            0b0,
+            side,
+            true,
+            "t == 0, x > s EXISTS",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, 0b11101),
+            0b11101,
+            0b10,
+            side,
+            true,
+            "t == 2, s == 29, matching value EXISTS ",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, u64::max_value()),
+            u64::max_value(),
+            u64::max_value(),
+            side,
+            true,
+            "t == s == max, matches 0 and 1",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, u64::max_value()),
+            0b101,
+            u64::max_value(),
+            side,
+            true,
+            "t == ones, x < ones, x matches 0",
+        );
+
+        test_invertibility(
+            DIVU,
+            (0b0, 0b0),
+            0b101,
+            0b101,
+            side,
+            false,
+            "fixed bits DON'T MATCH, x == 0, t != ones",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, 0b101),
+            0b101,
+            0b0,
+            side,
+            false,
+            "t == 0, x > s NOT POSSIBLE",
+        );
+        test_invertibility(
+            DIVU,
+            (0b0, u64::max_value() - 6),
+            0b11101,
+            0b10,
+            side,
+            false,
+            "t == 2, s == 25, matching value DOESN'T EXIST",
+        );
+        test_invertibility(
+            DIVU,
+            (0b10, u64::max_value() - 1),
+            u64::max_value(),
+            u64::max_value(),
+            side,
+            false,
+            "t == s == ones, DOESN'T match 0 or 1",
+        );
+        test_invertibility(
+            DIVU,
+            (0b100, u64::max_value()),
+            0b101,
+            u64::max_value(),
+            side,
+            false,
+            "t == ones, x < ones, x DOESN'T match 0",
+        );
+    }
+
+    #[test]
+    fn compute_inverse_values_for_equals_with_cb() {
+        let side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            if l == r {
+                BitVector(1)
+            } else {
+                BitVector(0)
+            }
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(EQUALS, (0b0, 0b111), 0b101, 0b0, side, f);
+        test_inverse_value_computation(EQUALS, (0b100, 0b100), 0b101, 0b0, side, f);
+
+        test_inverse_value_computation(EQUALS, (0b100, 0b111), 0b101, 0b1, side, f);
+    }
+
+    #[test]
+    fn compute_inverse_values_for_and_with_cb() {
+        let side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l & r
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(AND, (0b0, 0b111), 0b101, 0b100, side, f);
+        test_inverse_value_computation(AND, (0b110, 0b111), 0b101, 0b100, side, f);
+        test_inverse_value_computation(AND, (0b000, 0b100), 0b101, 0b100, side, f);
+    }
+
+    #[test]
+    fn compute_inverse_values_for_sltu_with_cb() {
+        let mut side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            if l < r {
+                BitVector(1)
+            } else {
+                BitVector(0)
+            }
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(SLTU, (0b0, 0b101), 0b101, 0b0, side, f);
+        test_inverse_value_computation(SLTU, (0b001, 0b111), 0b101, 0b1, side, f);
+
+        side = OperandSide::Rhs;
+
+        test_inverse_value_computation(SLTU, (0b101, 0b111), 0b101, 0b0, side, f);
+        test_inverse_value_computation(SLTU, (0b001, 0b111), 0b101, 0b1, side, f);
+    }
+
+    #[test]
+    fn compute_inverse_values_for_add_with_cb() {
+        let side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l + r
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(ADD, (0b0, 0b010), 0b101, 0b111, side, f);
+        test_inverse_value_computation(ADD, (0b1, u64::max_value() - 4), 0b101, 0b0, side, f);
+        test_inverse_value_computation(
+            ADD,
+            (0b0, u64::max_value() - 5),
+            0b101,
+            u64::max_value(),
+            side,
+            f,
+        );
+    }
+
+    #[test]
+    fn compute_inverse_values_for_sub_with_cb() {
+        let mut side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l - r
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(SUB, (0b100, 0b110), 0b101, 0b1, side, f);
+        test_inverse_value_computation(
+            SUB,
+            (0b100, u64::max_value() - 1),
+            0b101,
+            u64::max_value(),
+            side,
+            f,
+        );
+
+        side = OperandSide::Rhs;
+
+        test_inverse_value_computation(SUB, (0b0, 0b010), 0b101, 0b101, side, f);
+        test_inverse_value_computation(
+            SUB,
+            (0b100, u64::max_value() - 1),
+            0b101,
+            u64::max_value(),
+            side,
+            f,
+        );
+    }
+
+    #[test]
+    fn compute_inverse_values_for_mul_with_cb() {
+        let side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l * r
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(MUL, (0b10, 0b110), 0b0, 0b0, side, f);
+        test_inverse_value_computation(MUL, (0b100, 0b111), 0b10, 0b1100, side, f);
+        test_inverse_value_computation(MUL, (0b1, 0b111), 0b101, 0b1111, side, f);
+        test_inverse_value_computation(
+            MUL,
+            (0b10, u64::max_value()),
+            0b10,
+            u64::max_value() - 3,
+            side,
+            f,
+        );
+        test_inverse_value_computation(
+            MUL,
+            (0b10, u64::max_value()),
+            0b101,
+            u64::max_value() - 4,
+            side,
+            f,
+        );
+        test_inverse_value_computation(
+            MUL,
+            (0b0, u64::max_value()),
+            0b11,
+            u64::max_value() / 2 + 1,
+            side,
+            f,
+        );
+        test_inverse_value_computation(
+            MUL,
+            (u64::max_value() / 2 + 1, u64::max_value()),
+            0b100,
+            0,
+            side,
+            f,
+        );
+    }
+
+    #[test]
+    fn compute_inverse_values_for_remu_with_cb() {
+        let mut side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l % r
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(REMU, (0b100, u64::max_value() - 18), 0b0, 0b1101, side, f);
+        test_inverse_value_computation(
+            REMU,
+            (0b100, u64::max_value()),
+            0b0,
+            u64::max_value(),
+            side,
+            f,
+        );
+        test_inverse_value_computation(REMU, (0b1, u64::max_value() - 8), 0b110, 0b101, side, f);
+        test_inverse_value_computation(
+            REMU,
+            (0b1000, u64::max_value() - 1),
+            0b1100,
+            0b100,
+            side,
+            f,
+        );
+        test_inverse_value_computation(
+            REMU,
+            (0b100, u64::max_value() - 11),
+            u64::max_value() / 2,
+            0b101,
+            side,
+            f,
+        );
+
+        side = OperandSide::Rhs;
+
+        test_inverse_value_computation(REMU, (0b0, 0b10), 0b101, 0b101, side, f);
+        test_inverse_value_computation(REMU, (0b1, 0b111), 0b101, 0b101, side, f);
+
+        test_inverse_value_computation(REMU, (0b101, 0b10111), 0b1010, 0b11, side, f);
+        test_inverse_value_computation(REMU, (0b10, 0b111), 0b11101, 0b101, side, f);
+    }
+
+    #[test]
+    fn compute_inverse_values_for_divu_with_cb() {
+        let side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l / r
+        }
+
+        // test only for values which are actually invertible
+        test_inverse_value_computation(DIVU, (0b10, 0b1111), 0b101, 0b0, side, f);
+        test_inverse_value_computation(DIVU, (0b1, 0b1011), 0b101, 0b10, side, f);
+        test_inverse_value_computation(
+            DIVU,
+            (0b11, u64::max_value()),
+            0b101,
+            u64::max_value() / 5,
+            side,
+            f,
+        );
+        test_inverse_value_computation(
+            DIVU,
+            (0b1, u64::max_value() - 2),
+            0b110,
+            u64::max_value() / 6,
+            side,
+            f,
+        );
+    }
 
     #[test]
     fn check_invertibility_condition_for_divu() {
@@ -1480,21 +2422,23 @@ mod tests {
     #[test]
     fn compute_inverse_values_for_mul() {
         let side = OperandSide::Lhs;
+        let x = (0, u64::max_value());
 
         fn f(l: BitVector, r: BitVector) -> BitVector {
             l * r
         }
 
         // test only for values which are actually invertible
-        test_inverse_value_computation(MUL, 0b1, 0b1, side, f);
-        test_inverse_value_computation(MUL, 0b10, 0b10, side, f);
-        test_inverse_value_computation(MUL, 0b100, 0b100, side, f);
-        test_inverse_value_computation(MUL, 0b10, 0b1100, side, f);
+        test_inverse_value_computation(MUL, x, 0b1, 0b1, side, f);
+        test_inverse_value_computation(MUL, x, 0b10, 0b10, side, f);
+        test_inverse_value_computation(MUL, x, 0b100, 0b100, side, f);
+        test_inverse_value_computation(MUL, x, 0b10, 0b1100, side, f);
     }
 
     #[test]
     fn compute_inverse_values_for_sltu() {
         let mut side = OperandSide::Lhs;
+        let x = (0, u64::max_value());
 
         fn f(l: BitVector, r: BitVector) -> BitVector {
             if l < r {
@@ -1505,15 +2449,15 @@ mod tests {
         }
 
         // test only for values which are actually invertible
-        test_inverse_value_computation(SLTU, u64::max_value(), 0, side, f);
-        test_inverse_value_computation(SLTU, 0, 0, side, f);
-        test_inverse_value_computation(SLTU, 1, 1, side, f);
+        test_inverse_value_computation(SLTU, x, u64::max_value(), 0, side, f);
+        test_inverse_value_computation(SLTU, x, 0, 0, side, f);
+        test_inverse_value_computation(SLTU, x, 1, 1, side, f);
 
         side = OperandSide::Rhs;
 
-        test_inverse_value_computation(SLTU, 0, 0, side, f);
-        test_inverse_value_computation(SLTU, u64::max_value() - 1, 1, side, f);
-        test_inverse_value_computation(SLTU, 1, 1, side, f);
+        test_inverse_value_computation(SLTU, x, 0, 0, side, f);
+        test_inverse_value_computation(SLTU, x, u64::max_value() - 1, 1, side, f);
+        test_inverse_value_computation(SLTU, x, 1, 1, side, f);
     }
 
     #[test]
@@ -1521,13 +2465,14 @@ mod tests {
         fn f(l: BitVector, r: BitVector) -> BitVector {
             l / r
         }
+        let x = (0, u64::max_value());
 
         // test only for values which are actually invertible
-        test_inverse_value_computation(DIVU, 0b1, 0b1, OperandSide::Lhs, f);
-        test_inverse_value_computation(DIVU, 0b1, 0b1, OperandSide::Rhs, f);
+        test_inverse_value_computation(DIVU, x, 0b1, 0b1, OperandSide::Lhs, f);
+        test_inverse_value_computation(DIVU, x, 0b1, 0b1, OperandSide::Rhs, f);
 
-        test_inverse_value_computation(DIVU, 2, 3, OperandSide::Lhs, f);
-        test_inverse_value_computation(DIVU, 6, 2, OperandSide::Rhs, f);
+        test_inverse_value_computation(DIVU, x, 2, 3, OperandSide::Lhs, f);
+        test_inverse_value_computation(DIVU, x, 6, 2, OperandSide::Rhs, f);
     }
 
     #[test]
@@ -1535,18 +2480,20 @@ mod tests {
         fn f(l: BitVector, r: BitVector) -> BitVector {
             l % r
         }
+        let x = (0, u64::max_value());
 
         // test only for values which are actually invertible
-        test_inverse_value_computation(REMU, u64::max_value(), 0, OperandSide::Lhs, f);
+        test_inverse_value_computation(REMU, x, u64::max_value(), 0, OperandSide::Lhs, f);
         test_inverse_value_computation(
             REMU,
+            x,
             u64::max_value() - 1,
             u64::max_value() - 1,
             OperandSide::Rhs,
             f,
         );
-        test_inverse_value_computation(REMU, 3, 2, OperandSide::Lhs, f);
-        test_inverse_value_computation(REMU, 5, 2, OperandSide::Rhs, f);
+        test_inverse_value_computation(REMU, x, 3, 2, OperandSide::Lhs, f);
+        test_inverse_value_computation(REMU, x, 5, 2, OperandSide::Rhs, f);
     }
 
     #[test]
