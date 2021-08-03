@@ -77,7 +77,7 @@ fn is_invertible(op: BVOperator, s: BitVector, t: BitVector, d: OperandSide) -> 
             }
         },
         BVOperator::Remu => match d {
-            OperandSide::Lhs => !(s <= t),
+            OperandSide::Lhs => !(-s) >= t,
             OperandSide::Rhs => {
                 if s == t {
                     true
@@ -176,25 +176,29 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
             OperandSide::Rhs => s - t,
         },
         BVOperator::Mul => {
-            let y = s >> s.ctz();
-
-            let y_inv = y
-                .modinverse()
-                .expect("a modular inverse has to exist iff operator is invertible");
-
-            let result = (t >> s.ctz()) * y_inv;
-
-            let to_shift = 64 - s.ctz();
-
-            let arbitrary_bit_mask = if to_shift == 64 {
-                BitVector(0)
+            if s == BitVector(0) {
+                BitVector(random::<u64>())
             } else {
-                BitVector::ones() << to_shift
-            };
+                let y = s >> s.ctz();
 
-            let arbitrary_bits = BitVector(random::<u64>()) & arbitrary_bit_mask;
+                let y_inv = y
+                    .modinverse()
+                    .expect("a modular inverse has to exist iff operator is invertible");
 
-            result | arbitrary_bits
+                let result = (t >> s.ctz()) * y_inv;
+
+                let to_shift = 64 - s.ctz();
+
+                let arbitrary_bit_mask = if to_shift == 64 {
+                    BitVector(0)
+                } else {
+                    BitVector::ones() << to_shift
+                };
+
+                let arbitrary_bits = BitVector(random::<u64>()) & arbitrary_bit_mask;
+
+                result | arbitrary_bits
+            }
         }
         BVOperator::Sltu => match d {
             OperandSide::Lhs => {
@@ -223,34 +227,23 @@ fn compute_inverse_value(op: BVOperator, s: BitVector, t: BitVector, d: OperandS
                 if (t == BitVector::ones()) && (s == BitVector(1)) {
                     BitVector::ones()
                 } else {
-                    let range_start = t * s;
-                    if range_start.0.overflowing_add(s.0 - 1).1 {
-                        BitVector(
-                            thread_rng()
-                                .sample(Uniform::new_inclusive(range_start.0, u64::max_value())),
-                        )
-                    } else {
-                        BitVector(thread_rng().sample(Uniform::new_inclusive(
-                            range_start.0,
-                            range_start.0 + (s.0 - 1),
-                        )))
-                    }
+                    let range_start = (t * s).0;
+                    let range_end = range_start.saturating_add(s.0 - 1);
+
+                    BitVector(thread_rng().sample(Uniform::new_inclusive(range_start, range_end)))
                 }
             }
             OperandSide::Rhs => {
-                if (t == s) && t == BitVector::ones() {
-                    BitVector(thread_rng().sample(Uniform::new_inclusive(0, 1)))
-                } else if (t == BitVector::ones()) && (s != BitVector::ones()) {
-                    BitVector(0)
-                } else {
-                    s / t
-                }
+                let range_start = s / (t + BitVector(1)) + BitVector(1);
+                let range_end = s / t;
+
+                BitVector(thread_rng().sample(Uniform::new_inclusive(range_start.0, range_end.0)))
             }
         },
         BVOperator::Remu => match d {
             OperandSide::Lhs => {
                 let y = BitVector(
-                    thread_rng().sample(Uniform::new_inclusive(1, ((BitVector::ones() - t) / s).0)),
+                    thread_rng().sample(Uniform::new_inclusive(0, ((BitVector::ones() - t) / s).0)),
                 );
                 // below computation cannot overflow due to how `y` was chosen
                 assert!(
@@ -892,6 +885,15 @@ mod tests {
         let side = OperandSide::Lhs;
 
         test_invertibility(MUL, 0b1, 0b1, side, true, "trivial multiplication");
+        test_invertibility(
+            MUL,
+            0b0,
+            0b0,
+            side,
+            true,
+            "trivial multiplication, t == s == 0",
+        );
+        test_invertibility(MUL, 0b10, 0b0, side, true, "trivial multiplication, t == 0");
         test_invertibility(MUL, 0b10, 0b1, side, false, "operand bigger than result");
         test_invertibility(
             MUL,
@@ -991,6 +993,8 @@ mod tests {
         test_inverse_value_computation(MUL, 0b10, 0b10, side, f);
         test_inverse_value_computation(MUL, 0b100, 0b100, side, f);
         test_inverse_value_computation(MUL, 0b10, 0b1100, side, f);
+        test_inverse_value_computation(MUL, 0b0, 0b0, side, f);
+        test_inverse_value_computation(MUL, 0b10, 0b0, side, f);
     }
 
     #[test]
