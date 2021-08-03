@@ -154,9 +154,9 @@ fn select<F: Formula>(
             (rhs, lhs, OperandSide::Rhs)
         } else if is_constant(f, rhs) {
             (lhs, rhs, OperandSide::Lhs)
-        } else if is_essential(f, lhs, OperandSide::Lhs, rhs, t, ab) {
+        } else if is_essential(f, idx, lhs, OperandSide::Lhs, t, ab) {
             (lhs, rhs, OperandSide::Lhs)
-        } else if is_essential(f, rhs, OperandSide::Rhs, lhs, t, ab) {
+        } else if is_essential(f, idx, rhs, OperandSide::Rhs, t, ab) {
             (rhs, lhs, OperandSide::Rhs)
         } else if random() {
             (rhs, lhs, OperandSide::Rhs)
@@ -440,15 +440,15 @@ fn value<F: Formula>(
 
 fn is_essential<F: Formula>(
     formula: &F,
+    n: SymbolId,
     this: SymbolId,
     on_side: OperandSide,
-    other: SymbolId,
     t: BitVector,
     ab: &[BitVector],
 ) -> bool {
     let ab_nx = ab[this];
 
-    match &formula[other] {
+    match &formula[n] {
         Symbol::Operator(op) => !is_invertible(*op, ab_nx, t, on_side.other()),
         // TODO: not mentioned in paper => improvised. is that really true?
         Symbol::Constant(_) | Symbol::Input(_) => false,
@@ -637,7 +637,9 @@ fn sat<F: Formula>(
             n = nx;
         }
 
-        update_assignment(formula, &mut ab, n, t);
+        if formula.is_input(n) {
+            update_assignment(formula, &mut ab, n, t);
+        }
     }
 
     let assignment: Assignment = formula.symbol_ids().map(|i| (i, ab[i])).collect();

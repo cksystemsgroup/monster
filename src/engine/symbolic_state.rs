@@ -411,6 +411,10 @@ impl<'a> Formula for FormulaView<'a> {
         !matches!(self.data_flow[NodeIndex::new(sym)], Symbol::Operator(_))
     }
 
+    fn is_input(&self, sym: SymbolId) -> bool {
+        matches!(self.data_flow[NodeIndex::new(sym)], Symbol::Input(_))
+    }
+
     fn traverse<V, R>(&self, n: SymbolId, visit_map: &mut HashMap<SymbolId, R>, v: &mut V) -> R
     where
         V: FormulaVisitor<R>,
