@@ -824,35 +824,47 @@ mod tests {
         // prove: Ey.(computed <> y == t)        where <> is the binary bit vector operator
         //
 
+        // compute inverse value for other operand
         let inverse = match op {
-            BVOperator::Add => t - computed,
+            BVOperator::Add => {
+                assert!(
+                    is_invertible(op, computed, t, d.other()),
+                    "consistent value has an inverse"
+                );
+                compute_inverse_value(op, computed, t, d.other())
+            }
             BVOperator::Mul => {
                 assert!(
-                    is_invertible(op, computed, t, d),
-                    "choose values which are invertible..."
+                    is_invertible(op, computed, t, d.other()),
+                    "consistent value has an inverse"
                 );
-
-                compute_inverse_value(op, computed, t, d)
+                compute_inverse_value(op, computed, t, d.other())
             }
-            BVOperator::Sltu => compute_inverse_value(op, computed, t, d),
+            BVOperator::Sltu => {
+                assert!(
+                    is_invertible(op, computed, t, d.other()),
+                    "consistent value has an inverse"
+                );
+                compute_inverse_value(op, computed, t, d.other())
+            }
             BVOperator::Divu => {
-                assert!(is_invertible(op, computed, t, d));
-                compute_inverse_value(op, computed, t, d)
+                assert!(
+                    is_invertible(op, computed, t, d.other()),
+                    "consistent value has an inverse"
+                );
+                compute_inverse_value(op, computed, t, d.other())
+            }
+            BVOperator::Remu => {
+                assert!(
+                    is_invertible(op, computed, t, d.other()),
+                    "consistent value has an inverse"
+                );
+                compute_inverse_value(op, computed, t, d.other())
             }
             _ => unimplemented!(),
         };
 
         if d == OperandSide::Lhs {
-            assert_eq!(
-                f(inverse, computed),
-                t,
-                "{:?} {:?} {:?} == {:?}",
-                inverse,
-                op,
-                computed,
-                t
-            );
-        } else {
             assert_eq!(
                 f(computed, inverse),
                 t,
@@ -860,6 +872,16 @@ mod tests {
                 computed,
                 op,
                 inverse,
+                t
+            );
+        } else {
+            assert_eq!(
+                f(inverse, computed),
+                t,
+                "{:?} {:?} {:?} == {:?}",
+                inverse,
+                op,
+                computed,
                 t
             );
         }
@@ -1114,5 +1136,24 @@ mod tests {
         // test only for values which actually have a consistent value
         test_consistent_value_computation(SLTU, 0, side, f);
         test_consistent_value_computation(SLTU, 1, side, f);
+    }
+
+    #[test]
+    fn compute_consistent_values_for_remu() {
+        let mut side = OperandSide::Lhs;
+
+        fn f(l: BitVector, r: BitVector) -> BitVector {
+            l % r
+        }
+
+        // test only for values which actually have a consistent value
+        test_consistent_value_computation(REMU, u64::max_value(), side, f);
+        test_consistent_value_computation(REMU, u64::max_value() / 2 + 7, side, f);
+        test_consistent_value_computation(REMU, 0, side, f);
+        test_consistent_value_computation(REMU, 7, side, f);
+
+        side = OperandSide::Rhs;
+        test_consistent_value_computation(REMU, u64::max_value(), side, f);
+        test_consistent_value_computation(REMU, 7, side, f);
     }
 }
