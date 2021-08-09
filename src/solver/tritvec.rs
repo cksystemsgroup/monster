@@ -3,7 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use super::BitVector;
-use rand::{distributions::Uniform, thread_rng, Rng};
+use rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng};
 use std::fmt;
 use thiserror::Error;
 
@@ -363,13 +363,15 @@ impl TritVector {
     ) -> CPResult<(TritVector, TritVector, TritVector)> {
         // TODO: check for cases that the fulladder cannot infer and add constraints if necessary,
         //       like xor = x ^ and | y ^ and
-        fn fulladder(
+        fn shuffled_fulladder(
             mut z: TritVector,
-            mut x: TritVector,
-            mut y: TritVector,
-            mut c: TritVector,
+            add: [TritVector; 3],
             mut co: TritVector,
         ) -> CPResult<(TritVector, TritVector, TritVector, TritVector, TritVector)> {
+            let mut s = vec![0, 1, 2];
+            s.shuffle(&mut thread_rng());
+
+            let (mut x, mut y, mut c) = (add[s[0]], add[s[1]], add[s[2]]);
             let mut t = [TritVector::default(); 5];
 
             loop {
@@ -393,11 +395,13 @@ impl TritVector {
                     u: nx.u & (nco.u | nz.u),
                 }
                 .validate()?;
+
                 let ny = TritVector {
                     l: ny.l | nco.l & nz.l,
                     u: ny.u & (nco.u | nz.u),
                 }
                 .validate()?;
+
                 let nc = TritVector {
                     l: nc.l | nco.l & nz.l,
                     u: nc.u & (nco.u | nz.u),
@@ -405,6 +409,14 @@ impl TritVector {
                 .validate()?;
 
                 if (z, x, y, c, co, t) == (nz, nx, ny, nc, nco, [t_0, t_1, t_2, t_3, t_4]) {
+                    let mut rev_s: Vec<_> = s.into_iter().enumerate().collect();
+                    rev_s.sort_by_key(|k| k.1);
+
+                    let rev_s: Vec<_> = rev_s.into_iter().map(|k| k.0).collect();
+
+                    let shuffled = [x, y, c];
+                    let (x, y, c) = (shuffled[rev_s[0]], shuffled[rev_s[1]], shuffled[rev_s[2]]);
+
                     return Ok((z, x, y, c, co));
                 }
 
@@ -421,9 +433,7 @@ impl TritVector {
         let mut z = self;
 
         loop {
-            let (nz, nx, ny, nc, nco) = fulladder(z, x, y, c, co)?;
-            let (nz, nx, nc, ny, nco) = fulladder(nz, nx, nc, ny, nco)?;
-            let (nz, ny, nc, nx, nco) = fulladder(nz, ny, nc, nx, nco)?;
+            let (nz, nx, ny, nc, nco) = shuffled_fulladder(z, [x, y, c], co)?;
 
             // force msb to 0 in non-overflowing addition
             let nco = if !o {
@@ -614,7 +624,7 @@ impl TritVector {
         mut y: TritVector,
         o: bool,
     ) -> CPResult<(TritVector, TritVector, TritVector)> {
-        fn build_y(yi: &[TritVector; 64]) -> TritVector {
+        fn build_y(yi: &[TritVector; 64], y: TritVector) -> TritVector {
             let mask = BitVector(1);
             let mut yl = BitVector(0);
             let mut yu = BitVector(0);
@@ -623,58 +633,75 @@ impl TritVector {
                 yl = yl | (e.l & (mask << i as u32));
                 yu = yu | (e.u & (mask << i as u32));
             }
-            TritVector { l: yl, u: yu }
+
+            TritVector {
+                l: yl,
+                u: y.force_cbs_onto(yu),
+            }
         }
 
         let mut t_shl = [TritVector::default(); 64];
         let mut t_ite = [TritVector::default(); 64];
-        let mut t_add = [TritVector::default(); 63];
+        let mut t_add = [TritVector::default(); 64];
         let mut yi = [TritVector::default(); 64];
 
         let mut change = true;
-        t_add[62] = self;
+        let mut prev = 0;
+        t_add[63] = self;
 
         while change {
             change = false;
-            for i in 0..64 {
+            for i in (0..64)
+                .filter(|i| *i == 0 || y.bit(*i).u != BitVector(0))
+                .map(|i| i as usize)
+            {
                 let (t_s, nx, _) =
                     t_shl[i].constrain_shl(x, TritVector::new(i as u64, i as u64)?)?;
                 let (t_i, nyi, t_s, _) =
                     t_ite[i].constrain_ite(y.sign_extend_bit(i as u32), t_s, TritVector::zero())?;
 
-                if (x, t_shl[i], t_ite[i]) != (nx, t_s, t_i) {
+                if (x, t_shl[i], t_ite[i], yi[i]) != (nx, t_s, t_i, nyi) {
                     change = true;
+                    x = nx;
+                    t_shl[i] = t_s;
+                    t_ite[i] = t_i;
+                    yi[i] = nyi;
                 }
-
-                x = nx;
-                t_shl[i] = t_s;
-                t_ite[i] = t_i;
-                yi[i] = nyi;
             }
 
-            let (t_a, t_ii, t_i) = t_add[0].constrain_add(t_ite[63], t_ite[62], o)?;
-
-            if (t_add[0], t_ite[63], t_ite[62]) != (t_a, t_ii, t_i) {
+            let (t_a, t_i) = t_add[0].constrain_eq(t_ite[0])?;
+            if (t_add[0], t_ite[0]) != (t_a, t_i) {
                 change = true;
+                t_add[0] = t_a;
+                t_ite[0] = t_i;
             }
 
-            t_add[0] = t_a;
-            t_ite[63] = t_ii;
-            t_ite[62] = t_i;
+            prev = 0;
 
-            for i in 1..63 {
-                let (t_ai, t_aii, t_i) = t_add[i].constrain_add(t_add[i - 1], t_ite[62 - i], o)?;
+            for i in (1..64)
+                .filter(|i| y.bit(*i).u != BitVector(0))
+                .map(|i| i as usize)
+            {
+                let (t_ai, t_aii, t_i) = t_add[i].constrain_add(t_add[prev], t_ite[i], o)?;
 
-                if (t_add[i], t_add[i - 1], t_ite[62 - i]) != (t_ai, t_aii, t_i) {
+                if (t_add[i], t_add[prev], t_ite[i]) != (t_ai, t_aii, t_i) {
                     change = true;
+                    t_add[i] = t_ai;
+                    t_add[prev] = t_aii;
+                    t_ite[i] = t_i;
                 }
 
-                t_add[i] = t_ai;
-                t_add[i - 1] = t_aii;
-                t_ite[62 - i] = t_i;
+                prev = i;
             }
 
-            let ny = build_y(&yi).validate()?;
+            let (t_z, _) = t_add[prev].constrain_eq(t_add[63])?;
+
+            if t_z != t_add[prev] {
+                change = true;
+                t_add[prev] = t_z;
+            }
+
+            let ny = build_y(&yi, y).validate()?;
 
             if y != ny {
                 change = true;
@@ -682,7 +709,7 @@ impl TritVector {
             }
         }
 
-        Ok((t_add[62], x, y))
+        Ok((t_add[prev], x, y))
     }
 
     pub fn constrain_divu(
