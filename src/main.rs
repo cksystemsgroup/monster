@@ -9,7 +9,6 @@ use log::info;
 use modeler::builder::generate_model;
 use modeler::memory::replace_memory;
 use modeler::optimize::fold_constants;
-use modeler::print_model;
 use modeler::unroller::{renumber_model, unroll_model};
 use modeler::write_model;
 use monster::{
@@ -29,6 +28,7 @@ use monster::{
     SymbolicExecutionOptions,
 };
 use riscu::load_object_file;
+use std::io::BufWriter;
 use std::{
     env,
     fmt::Display,
@@ -203,12 +203,11 @@ fn main() -> Result<()> {
             }
 
             if let Some(output_path) = _output {
-                let _ = write_model(&model, output_path);
+                let buffer = BufWriter::new(File::create(output_path)?);
+                write_model(&model, buffer)
             } else {
-                print_model(&model);
+                write_model(&model, stdout())
             }
-
-            Ok(())
         }
         ("rarity", Some(args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;

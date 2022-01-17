@@ -1,10 +1,8 @@
-use crate::PathBuf;
+use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::LinkedList;
-use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::prelude::*;
-use std::io::BufWriter;
 use std::rc::Rc;
 
 //
@@ -149,70 +147,10 @@ pub struct HashableNodeRef {
 }
 
 #[rustfmt::skip]
-pub fn print_model(model: &Model) {
-    println!("; cksystemsgroup.github.io/monster\n");
-    println!("1 sort bitvec 1 ; Boolean");
-    println!("2 sort bitvec 64 ; 64-bit machine word");
-    println!("3 sort array 2 2 ; 64-bit virtual memory");
-    println!("11 sort bitvec 8 ; 1 byte");
-    println!("12 sort bitvec 16 ; 2 bytes");
-    println!("13 sort bitvec 24 ; 3 bytes");
-    println!("14 sort bitvec 32 ; 4 bytes");
-    println!("15 sort bitvec 40 ; 5 bytes");
-    println!("16 sort bitvec 48 ; 6 bytes");
-    println!("17 sort bitvec 56 ; 7 bytes");
-    for node in model.lines.iter() {
-        match &*node.borrow() {
-            Node::Const { nid, sort, imm } =>
-                println!("{} constd {} {}", nid, get_sort(sort), imm),
-            Node::Read { nid, memory, address } =>
-                println!("{} read 2 {} {}", nid, get_nid(memory), get_nid(address)),
-            Node::Write { nid, memory, address, value } =>
-                println!("{} write 3 {} {} {}", nid, get_nid(memory), get_nid(address), get_nid(value)),
-            Node::Add { nid, left, right } =>
-                println!("{} add 2 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::Sub { nid, left, right } =>
-                println!("{} sub 2 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::Mul {nid, left, right} =>
-                println!("{} mul 2 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::Div { nid, left, right } =>
-                println!("{} udiv 2 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::Rem { nid, left, right } =>
-                println!("{} urem 2 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::Ult { nid, left, right } =>
-                println!("{} ult 1 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::Ext { nid, from, value } =>
-                println!("{} uext 2 {} {}", nid, get_nid(value), 64 - get_bitsize(from)),
-            Node::Ite { nid, sort, cond, left, right } =>
-                println!("{} ite {} {} {} {}", nid, get_sort(sort), get_nid(cond), get_nid(left), get_nid(right)),
-            Node::Eq { nid, left, right } =>
-                println!("{} eq 1 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::And { nid, left, right } =>
-                println!("{} and 1 {} {}", nid, get_nid(left), get_nid(right)),
-            Node::Not { nid, value } =>
-                println!("{} not 1 {}", nid, get_nid(value)),
-            Node::State { nid, sort, init, name } => {
-                println!("{} state {} {}", nid, get_sort(sort), name.as_deref().unwrap_or("?"));
-                if let Some(value) = init {
-                    println!("{} init {} {} {}", nid + 1, get_sort(sort), nid, get_nid(value));
-                }
-            }
-            Node::Next { nid, sort, state, next } =>
-                println!("{} next {} {} {}", nid, get_sort(sort), get_nid(state), get_nid(next)),
-            Node::Input { nid, sort, name } =>
-                println!("{} input {} {}", nid, get_sort(sort), name),
-            Node::Bad { nid, cond, name } =>
-                println!("{} bad {} {}", nid, get_nid(cond), name.as_deref().unwrap_or("?")),
-            Node::Comment(s) =>
-                println!("\n; {}\n", s),
-        }
-    }
-    println!("\n; end of BTOR2 file");
-}
+pub fn write_model<W>(model: &Model, mut buffer: W)  -> Result<()>
+    where W: Write + Send + 'static
+    {
 
-#[rustfmt::skip]
-pub fn write_model(model: &Model, output_path: PathBuf) -> std::io::Result<()> {
-    let mut buffer = BufWriter::new(File::create(output_path)?);
     buffer.write_all(b"; cksystemsgroup.github.io/monster\n\n")?;
     buffer.write_all(b"1 sort bitvec 1 ; Boolean\n")?;
     buffer.write_all(b"2 sort bitvec 64 ; 64-bit machine word\n")?;
