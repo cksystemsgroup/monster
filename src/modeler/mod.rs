@@ -1,10 +1,10 @@
 use crate::PathBuf;
-use std::fs::File;
-use std::io::BufWriter;
-use std::io::prelude::*;
 use std::cell::RefCell;
 use std::collections::LinkedList;
+use std::fs::File;
 use std::hash::{Hash, Hasher};
+use std::io::prelude::*;
+use std::io::BufWriter;
 use std::rc::Rc;
 
 //

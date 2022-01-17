@@ -10,8 +10,8 @@ use modeler::builder::generate_model;
 use modeler::memory::replace_memory;
 use modeler::optimize::fold_constants;
 use modeler::print_model;
-use modeler::write_model;
 use modeler::unroller::{renumber_model, unroll_model};
+use modeler::write_model;
 use monster::{
     disassemble::disassemble,
     generate_smt, generate_smt_to_file,
@@ -183,9 +183,9 @@ fn main() -> Result<()> {
         }
         ("model", Some(args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
-            
+
             let _output = expect_optional_arg::<PathBuf>(args, "output-file")?;
-            
+
             let unroll = expect_optional_arg(args, "unroll-model")?;
 
             let program = load_object_file(&input)?;
@@ -204,7 +204,7 @@ fn main() -> Result<()> {
 
             if let Some(output_path) = _output {
                 let _ = write_model(&model, output_path);
-            }else{
+            } else {
                 print_model(&model);
             }
 
