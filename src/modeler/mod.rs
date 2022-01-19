@@ -9,6 +9,7 @@ use std::rc::Rc;
 // Public Interface
 //
 
+pub mod bitblasting;
 pub mod builder;
 pub mod memory;
 pub mod optimize;
@@ -241,7 +242,7 @@ fn get_nid(node: &NodeRef) -> Nid {
     }
 }
 
-fn get_sort(sort: &NodeType) -> Nid {
+pub fn get_sort(sort: &NodeType) -> Nid {
     match *sort {
         NodeType::Bit => 1,
         NodeType::Word => 2,
@@ -256,7 +257,7 @@ fn get_sort(sort: &NodeType) -> Nid {
     }
 }
 
-fn get_bitsize(sort: &NodeType) -> usize {
+pub fn get_bitsize(sort: &NodeType) -> usize {
     match *sort {
         NodeType::Bit => 1,
         NodeType::Input1Byte => 8,

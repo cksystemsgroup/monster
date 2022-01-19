@@ -6,6 +6,7 @@ use bytesize::ByteSize;
 use cli::{expect_arg, expect_optional_arg, LogLevel};
 use env_logger::{Env, TimestampPrecision};
 use log::info;
+use modeler::bitblasting::bitblast_model;
 use modeler::builder::generate_model;
 use modeler::memory::replace_memory;
 use modeler::optimize::fold_constants;
@@ -204,10 +205,19 @@ fn main() -> Result<()> {
 
             if let Some(output_path) = _output {
                 let buffer = BufWriter::new(File::create(output_path)?);
-                write_model(&model, buffer)
+                let _ = write_model(&model, buffer);
             } else {
-                write_model(&model, stdout())
+                let _ = write_model(&model, stdout());
             }
+
+            let bitblasting_arg: Option<bool> = expect_optional_arg(args, "bitblasting")?;
+
+            if let Some(do_bitblasting) = bitblasting_arg {
+                if do_bitblasting {
+                    bitblast_model(&model);
+                }
+            }
+            Ok(())
         }
         ("rarity", Some(args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
