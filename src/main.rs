@@ -29,7 +29,6 @@ use monster::{
     SymbolicExecutionOptions,
 };
 use riscu::load_object_file;
-use std::io::BufWriter;
 use std::{
     env,
     fmt::Display,
@@ -184,10 +183,9 @@ fn main() -> Result<()> {
         }
         ("model", Some(args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
-
-            let _output = expect_optional_arg::<PathBuf>(args, "output-file")?;
-
+            let output = expect_optional_arg::<PathBuf>(args, "output-file")?;
             let unroll = expect_optional_arg(args, "unroll-model")?;
+            let prune = args.is_present("prune-model");
 
             let program = load_object_file(&input)?;
 
@@ -200,14 +198,14 @@ fn main() -> Result<()> {
                     unroll_model(&mut model, n);
                     fold_constants(&mut model);
                 }
-                renumber_model(&mut model);
+                renumber_model(&mut model, prune);
             }
 
-            if let Some(output_path) = _output {
-                let buffer = BufWriter::new(File::create(output_path)?);
-                let _ = write_model(&model, buffer);
+            if let Some(output_path) = output {
+                let file = File::create(output_path)?;
+                write_model(&model, file)?;
             } else {
-                let _ = write_model(&model, stdout());
+                write_model(&model, stdout())?;
             }
 
             let bitblasting_arg: Option<bool> = expect_optional_arg(args, "bitblasting")?;

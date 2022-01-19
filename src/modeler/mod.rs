@@ -2,7 +2,8 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::LinkedList;
 use std::hash::{Hash, Hasher};
-use std::io::prelude::*;
+use std::io::Write;
+use std::ops::Range;
 use std::rc::Rc;
 
 //
@@ -138,8 +139,10 @@ pub struct Model {
     pub sequentials: Vec<NodeRef>,
     pub bad_states_initial: Vec<NodeRef>,
     pub bad_states_sequential: Vec<NodeRef>,
+    pub data_range: Range<u64>,
+    pub heap_range: Range<u64>,
+    pub stack_range: Range<u64>,
     pub memory_size: u64,
-    pub program_break: u64,
 }
 
 #[derive(Debug)]
@@ -148,69 +151,75 @@ pub struct HashableNodeRef {
 }
 
 #[rustfmt::skip]
-pub fn write_model<W>(model: &Model, mut buffer: W)  -> Result<()>
-    where W: Write + Send + 'static
-    {
-
-    buffer.write_all(b"; cksystemsgroup.github.io/monster\n\n")?;
-    buffer.write_all(b"1 sort bitvec 1 ; Boolean\n")?;
-    buffer.write_all(b"2 sort bitvec 64 ; 64-bit machine word\n")?;
-    buffer.write_all(b"3 sort array 2 2 ; 64-bit virtual memory\n")?;
-    buffer.write_all(b"11 sort bitvec 8 ; 1 byte\n")?;
-    buffer.write_all(b"12 sort bitvec 16 ; 2 bytes\n")?;
-    buffer.write_all(b"13 sort bitvec 24 ; 3 bytes\n")?;
-    buffer.write_all(b"14 sort bitvec 32 ; 4 bytes\n")?;
-    buffer.write_all(b"15 sort bitvec 40 ; 5 bytes\n")?;
-    buffer.write_all(b"16 sort bitvec 48 ; 6 bytes\n")?;
-    buffer.write_all(b"17 sort bitvec 56 ; 7 bytes\n")?;
+pub fn write_model<W>(model: &Model, mut out: W) -> Result<()>
+where
+    W: Write,
+{
+    writeln!(out, "; cksystemsgroup.github.io/monster\n")?;
+    writeln!(out,
+        "; {} total virtual memory, {} data, {} max heap, {} max stack\n",
+        bytesize::ByteSize(model.memory_size).to_string_as(true),
+        bytesize::ByteSize(model.data_range.size_hint().0 as u64),
+        bytesize::ByteSize(model.heap_range.size_hint().0 as u64),
+        bytesize::ByteSize(model.stack_range.size_hint().0 as u64)
+    )?;
+    writeln!(out, "1 sort bitvec 1 ; Boolean")?;
+    writeln!(out, "2 sort bitvec 64 ; 64-bit machine word")?;
+    writeln!(out, "3 sort array 2 2 ; 64-bit virtual memory")?;
+    writeln!(out, "11 sort bitvec 8 ; 1 byte")?;
+    writeln!(out, "12 sort bitvec 16 ; 2 bytes")?;
+    writeln!(out, "13 sort bitvec 24 ; 3 bytes")?;
+    writeln!(out, "14 sort bitvec 32 ; 4 bytes")?;
+    writeln!(out, "15 sort bitvec 40 ; 5 bytes")?;
+    writeln!(out, "16 sort bitvec 48 ; 6 bytes")?;
+    writeln!(out, "17 sort bitvec 56 ; 7 bytes")?;
     for node in model.lines.iter() {
         match &*node.borrow() {
             Node::Const { nid, sort, imm } =>
-                buffer.write_all(format!("{} constd {} {}\n", nid, get_sort(sort), imm).as_bytes())?,
+                writeln!(out, "{} constd {} {}", nid, get_sort(sort), imm)?,
             Node::Read { nid, memory, address } =>
-                buffer.write_all(format!("{} read 2 {} {}\n", nid, get_nid(memory), get_nid(address)).as_bytes())?,
+                writeln!(out, "{} read 2 {} {}", nid, get_nid(memory), get_nid(address))?,
             Node::Write { nid, memory, address, value } =>
-                buffer.write_all(format!("{} write 3 {} {} {}\n", nid, get_nid(memory), get_nid(address), get_nid(value)).as_bytes())?,
+                writeln!(out, "{} write 3 {} {} {}", nid, get_nid(memory), get_nid(address), get_nid(value))?,
             Node::Add { nid, left, right } =>
-                buffer.write_all(format!("{} add 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} add 2 {} {}", nid, get_nid(left), get_nid(right))?,
             Node::Sub { nid, left, right } =>
-                buffer.write_all(format!("{} sub 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
-            Node::Mul {nid, left, right} =>
-                buffer.write_all(format!("{} mul 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} sub 2 {} {}", nid, get_nid(left), get_nid(right))?,
+            Node::Mul { nid, left, right } =>
+                writeln!(out, "{} mul 2 {} {}", nid, get_nid(left), get_nid(right))?,
             Node::Div { nid, left, right } =>
-                buffer.write_all(format!("{} udiv 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} udiv 2 {} {}", nid, get_nid(left), get_nid(right))?,
             Node::Rem { nid, left, right } =>
-                buffer.write_all(format!("{} urem 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} urem 2 {} {}", nid, get_nid(left), get_nid(right))?,
             Node::Ult { nid, left, right } =>
-                buffer.write_all(format!("{} ult 1 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} ult 1 {} {}", nid, get_nid(left), get_nid(right))?,
             Node::Ext { nid, from, value } =>
-                buffer.write_all(format!("{} uext 2 {} {}\n", nid, get_nid(value), 64 - get_bitsize(from)).as_bytes())?,
+                writeln!(out, "{} uext 2 {} {}", nid, get_nid(value), 64 - get_bitsize(from))?,
             Node::Ite { nid, sort, cond, left, right } =>
-                buffer.write_all(format!("{} ite {} {} {} {}\n", nid, get_sort(sort), get_nid(cond), get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} ite {} {} {} {}", nid, get_sort(sort), get_nid(cond), get_nid(left), get_nid(right))?,
             Node::Eq { nid, left, right } =>
-                buffer.write_all(format!("{} eq 1 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} eq 1 {} {}", nid, get_nid(left), get_nid(right))?,
             Node::And { nid, left, right } =>
-                buffer.write_all(format!("{} and 1 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
+                writeln!(out, "{} and 1 {} {}", nid, get_nid(left), get_nid(right))?,
             Node::Not { nid, value } =>
-                buffer.write_all(format!("{} not 1 {}\n", nid, get_nid(value)).as_bytes())?,
+                writeln!(out, "{} not 1 {}", nid, get_nid(value))?,
             Node::State { nid, sort, init, name } => {
-                buffer.write_all(format!("{} state {} {}\n", nid, get_sort(sort), name.as_deref().unwrap_or("?")).as_bytes())?;
+                writeln!(out, "{} state {} {}", nid, get_sort(sort), name.as_deref().unwrap_or("?"))?;
                 if let Some(value) = init {
-                    buffer.write_all(format!("{} init {} {} {}\n", nid + 1, get_sort(sort), nid, get_nid(value)).as_bytes())?;
+                    writeln!(out, "{} init {} {} {}", nid + 1, get_sort(sort), nid, get_nid(value))?;
                 }
             }
             Node::Next { nid, sort, state, next } =>
-                buffer.write_all(format!("{} next {} {} {}\n", nid, get_sort(sort), get_nid(state), get_nid(next)).as_bytes())?,
+                writeln!(out, "{} next {} {} {}", nid, get_sort(sort), get_nid(state), get_nid(next))?,
             Node::Input { nid, sort, name } =>
-                buffer.write_all(format!("{} input {} {}\n", nid, get_sort(sort), name).as_bytes())?,
+                writeln!(out, "{} input {} {}", nid, get_sort(sort), name)?,
             Node::Bad { nid, cond, name } =>
-                buffer.write_all(format!("{} bad {} {}\n", nid, get_nid(cond), name.as_deref().unwrap_or("?")).as_bytes())?,
+                writeln!(out, "{} bad {} {}", nid, get_nid(cond), name.as_deref().unwrap_or("?"))?,
             Node::Comment(s) =>
-                buffer.write_all(format!("\n\n; {}\n\n", s).as_bytes())?,
+                writeln!(out, "\n; {}\n", s)?,
         }
     }
-    buffer.write_all(b"\n\n; end of BTOR2 file")?;
-    buffer.flush()?;
+    writeln!(out, "\n; end of BTOR2 file")?;
     Ok(())
 }
 
