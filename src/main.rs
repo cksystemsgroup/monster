@@ -212,7 +212,7 @@ fn main() -> Result<()> {
 
             if let Some(do_bitblasting) = bitblasting_arg {
                 if do_bitblasting {
-                    bitblast_model(&model);
+                    bitblast_model(&model, true); // TODO: ask parameter to determine if bitblasting should do constant propagation, now it always do constant propagation
                 }
             }
             Ok(())

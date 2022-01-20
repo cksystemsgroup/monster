@@ -4,8 +4,9 @@ use std::rc::Rc;
 
 // public interface
 
-pub fn bitblast_model(model: &Model) -> Vec<GateRef> {
-    let mut bitblasting = BitBlasting::new();
+pub fn bitblast_model(model: &Model, constant_propagation: bool) -> Vec<GateRef> {
+    let mut bitblasting = BitBlasting::new(constant_propagation);
+
     bitblasting.process_model(model)
 }
 type GateRef = Rc<Gate>;
@@ -56,15 +57,118 @@ pub enum Gate {
 //     value: GateRef
 // }
 
+fn get_gate_from_constant_bit(bit: u64) -> GateRef {
+    assert!((bit == 0) | (bit == 1));
+    if bit == 1 {
+        GateRef::from(Gate::ConstTrue)
+    } else {
+        GateRef::from(Gate::ConstFalse)
+    }
+}
+
+fn is_constant(gate_type: GateRef) -> bool {
+    *gate_type == Gate::ConstFalse || *gate_type == Gate::ConstTrue
+}
+
+fn get_constant(gate_type: GateRef) -> Option<bool> {
+    if is_constant(gate_type.clone()) {
+        if *gate_type == Gate::ConstFalse {
+            Some(false)
+        } else {
+            Some(true)
+        }
+    } else {
+        None
+    }
+}
+
+fn get_gate_from_boolean(a: bool) -> GateRef {
+    if a {
+        GateRef::from(Gate::ConstTrue)
+    } else {
+        GateRef::from(Gate::ConstFalse)
+    }
+}
+
+fn are_there_false_constants(const1: Option<bool>, const2: Option<bool>) -> bool {
+    if let Some(a) = const1 {
+        if !a {
+            return true;
+        }
+    }
+
+    if let Some(b) = const2 {
+        return !b;
+    }
+    false
+}
+
+fn are_both_constants(const1: Option<bool>, const2: Option<bool>) -> bool {
+    if let Some(_a) = const1 {
+        if let Some(_b) = const2 {
+            return true;
+        }
+    }
+    false
+}
+
+fn get_non_constant_gate(const1: GateRef, const2: GateRef) -> Option<GateRef> {
+    if let Some(_gate) = get_constant(const1.clone()) {
+        Some(const1)
+    } else if let Some(_gate) = get_constant(const2.clone()) {
+        get_constant(const2.clone()).map(|_gate| const2)
+    } else {
+        None
+    }
+}
+
+fn get_replacement_from_constant(sort: &NodeType, value_: u64) -> Vec<GateRef> {
+    let total_bits = get_bitsize(sort);
+    let mut replacement: Vec<GateRef> = Vec::new();
+    let mut value = value_;
+    for _ in 0..total_bits {
+        replacement.push(get_gate_from_constant_bit(value % 2));
+        value /= 2;
+    }
+    replacement
+}
+
+fn get_replacement_from_unique_gate(sort: &NodeType, gate_type: Gate) -> Vec<GateRef> {
+    let total_bits = get_bitsize(sort);
+    let mut replacement: Vec<GateRef> = Vec::new();
+    let gate = GateRef::from(gate_type);
+    for _ in 0..total_bits {
+        replacement.push(gate.clone());
+    }
+    replacement
+}
+
+fn and_gate(a: Option<bool>, b: Option<bool>, a_gate: GateRef, b_gate: GateRef) -> GateRef {
+    if are_both_constants(a, b) {
+        get_gate_from_boolean(a.unwrap() && b.unwrap())
+    } else if are_there_false_constants(a, b) {
+        GateRef::from(Gate::ConstFalse)
+    } else if let Some(result) = get_non_constant_gate(a_gate.clone(), b_gate.clone()) {
+        result
+    } else {
+        GateRef::from(Gate::And {
+            left: a_gate,
+            right: b_gate,
+        })
+    }
+}
+
 pub struct BitBlasting {
     mapping: HashMap<HashableNodeRef, Vec<GateRef>>,
+    constant_propagation: bool,
     // computed_values: HashMap<GateRef, bool>
 }
 
 impl BitBlasting {
-    pub fn new() -> Self {
+    pub fn new(constant_propagation_: bool) -> Self {
         Self {
             mapping: HashMap::new(),
+            constant_propagation: constant_propagation_,
             // computed_values: HashMap::new()
         }
     }
@@ -84,54 +188,39 @@ impl BitBlasting {
         }
     }
 
-    fn get_gate_from_constant_bit(&mut self, bit: u64) -> GateRef {
-        assert!((bit == 0) | (bit == 1));
-        if bit == 1 {
-            GateRef::from(Gate::ConstTrue)
-        } else {
-            GateRef::from(Gate::ConstFalse)
-        }
-    }
-
-    fn get_replacement_from_constant(&mut self, sort: &NodeType, value_: u64) -> Vec<GateRef> {
-        let total_bits = get_bitsize(sort);
-        let mut replacement: Vec<GateRef> = Vec::new();
-        let mut value = value_;
-        for _ in 0..total_bits {
-            replacement.push(self.get_gate_from_constant_bit(value % 2));
-            value /= 2;
-        }
-        replacement
-    }
-
-    fn get_replacement_from_unique_gate(
+    fn fold_bitwise_gate<F>(
         &mut self,
-        sort: &NodeType,
-        gate_type: Gate,
-    ) -> Vec<GateRef> {
-        let total_bits = get_bitsize(sort);
+        node: &NodeRef,
+        left: Vec<GateRef>,
+        right: Vec<GateRef>,
+        f_gate: F,
+        _f_name: &str,
+    ) -> Vec<GateRef>
+    where
+        F: Fn(Option<bool>, Option<bool>, GateRef, GateRef) -> GateRef,
+    {
+        assert!(left.len() == right.len());
+
         let mut replacement: Vec<GateRef> = Vec::new();
-        let gate = GateRef::from(gate_type);
-        for _ in 0..total_bits {
-            replacement.push(gate.clone());
-        }
-        replacement
-    }
 
-    fn is_constant(&mut self, gate_type: GateRef) -> bool {
-        *gate_type == Gate::ConstFalse || *gate_type == Gate::ConstTrue
-    }
-
-    fn get_constant(&mut self, gate_type: GateRef) -> Option<bool> {
-        if self.is_constant(gate_type.clone()) {
-            if *gate_type == Gate::ConstFalse {
-                Some(false)
+        for (l_bit, r_bit) in left.iter().zip(right.iter()) {
+            if self.constant_propagation {
+                let l_bit_const = get_constant(l_bit.clone());
+                let r_bit_const = get_constant(r_bit.clone());
+                replacement.push(f_gate(
+                    l_bit_const,
+                    r_bit_const,
+                    (*l_bit).clone(),
+                    (*r_bit).clone(),
+                ));
             } else {
-                Some(true)
+                replacement.push(GateRef::from(Gate::And {
+                    left: (*l_bit).clone(),
+                    right: (*r_bit).clone(),
+                }))
             }
-        } else {
-            None
         }
+        self.record_mapping(node, replacement)
     }
 
     fn visit(&mut self, node: &NodeRef) -> Vec<GateRef> {
@@ -151,14 +240,14 @@ impl BitBlasting {
                 if let Some(replacement) = self.query_existence(node) {
                     replacement
                 } else {
-                    let replacement = self.get_replacement_from_constant(sort, *imm);
+                    let replacement = get_replacement_from_constant(sort, *imm);
                     self.record_mapping(node, replacement)
                 }
             } Node::Input { nid: _, sort, name: _ } => {
                 if let Some(replacement) = self.query_existence(node) {
                     replacement
                 } else {
-                    let replacement = self.get_replacement_from_unique_gate(sort, Gate::InputBit);
+                    let replacement = get_replacement_from_unique_gate(sort, Gate::InputBit);
                     self.record_mapping(node, replacement)
                 }
 
@@ -170,7 +259,7 @@ impl BitBlasting {
                     if let Some(value) = init {
                         replacement = self.visit(value);
                     } else {
-                        replacement = self.get_replacement_from_unique_gate(sort, Gate::ConstFalse);
+                        replacement = get_replacement_from_unique_gate(sort, Gate::ConstFalse);
                     }
                     self.record_mapping(node, replacement)
                 }
@@ -182,7 +271,7 @@ impl BitBlasting {
                     let mut replacement: Vec<GateRef> = Vec::new();
 
                     for bit in bitvector {
-                        if self.is_constant(bit.clone()) {
+                        if self.constant_propagation && is_constant(bit.clone()) {
                             if *bit == Gate::ConstFalse {
                                 replacement.push(GateRef::from(Gate::ConstTrue));
                             } else {
@@ -208,33 +297,7 @@ impl BitBlasting {
                 } else {
                     let left_operand = self.visit(left);
                     let right_operand = self.visit(right);
-                    assert!(left_operand.len() == right_operand.len());
-
-                    let mut replacement: Vec<GateRef> = Vec::new();
-                    for (l_bit, r_bit) in left_operand.iter().zip(right_operand.iter()) {
-                        if let Some(l_bit_const) = self.get_constant(l_bit.clone()) {
-                            if let Some(r_bit_const) = self.get_constant(r_bit.clone()) {
-                                if l_bit_const && r_bit_const {
-                                    replacement.push(GateRef::from(Gate::ConstTrue));
-                                } else {
-                                    replacement.push(GateRef::from(Gate::ConstFalse));
-                                }
-                            } else if l_bit_const {
-                                replacement.push((*r_bit).clone());
-                            } else {
-                                replacement.push(GateRef::from(Gate::ConstFalse));
-                            }
-                        } else if let Some(r_bit_const) = self.get_constant(r_bit.clone()) {
-                            if r_bit_const {
-                                replacement.push((*l_bit).clone());
-                            } else {
-                                replacement.push(GateRef::from(Gate::ConstFalse));
-                            }
-                        } else {
-                            replacement.push(GateRef::from(Gate::And{left:(*l_bit).clone(), right:(*r_bit).clone()}));
-                        }
-                    }
-                    self.record_mapping(node, replacement)
+                    self.fold_bitwise_gate(node, left_operand, right_operand, and_gate, "AND")
                 }
             } Node::Ext { nid: _, from, value } => {
                 if let Some(replacement) = self.query_existence(node) {
