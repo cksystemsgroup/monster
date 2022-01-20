@@ -191,14 +191,16 @@ impl BitBlasting {
     fn fold_bitwise_gate<F>(
         &mut self,
         node: &NodeRef,
-        left: Vec<GateRef>,
-        right: Vec<GateRef>,
+        left_operand: &NodeRef,
+        right_operand: &NodeRef,
         f_gate: F,
         _f_name: &str,
     ) -> Vec<GateRef>
     where
         F: Fn(Option<bool>, Option<bool>, GateRef, GateRef) -> GateRef,
     {
+        let left = self.visit(left_operand);
+        let right = self.visit(right_operand);
         assert!(left.len() == right.len());
 
         let mut replacement: Vec<GateRef> = Vec::new();
@@ -295,9 +297,7 @@ impl BitBlasting {
                 if let Some(replacement) = self.query_existence(node) {
                     replacement
                 } else {
-                    let left_operand = self.visit(left);
-                    let right_operand = self.visit(right);
-                    self.fold_bitwise_gate(node, left_operand, right_operand, and_gate, "AND")
+                    self.fold_bitwise_gate(node, left, right, and_gate, "AND")
                 }
             } Node::Ext { nid: _, from, value } => {
                 if let Some(replacement) = self.query_existence(node) {
