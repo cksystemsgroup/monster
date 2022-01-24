@@ -88,6 +88,27 @@ fn get_constant(gate_type: GateRef) -> Option<bool> {
     }
 }
 
+fn get_2s_complement(bitvector: Vec<GateRef>) -> Vec<GateRef> {
+    // invert bits
+
+    let mut inverted_bits: Vec<GateRef> = Vec::new();
+
+    for bit in bitvector {
+        inverted_bits.push(not_gate(bit));
+    }
+
+    // build a bitvector that represents 1
+
+    let mut bitvector_1: Vec<GateRef> = vec![GateRef::from(Gate::ConstTrue)];
+
+    assert!(bitvector_1.len() < inverted_bits.len());
+    while bitvector_1.len() != inverted_bits.len() {
+        bitvector_1.push(GateRef::from(Gate::ConstFalse));
+    }
+
+    bitwise_add(inverted_bits, bitvector_1)
+}
+
 // fn get_numeric_from_gate(gate_type: GateRef) -> Option<u8> {
 //     if let Some(result) = get_constant(gate_type) {
 //         if result {
@@ -200,6 +221,20 @@ fn or_gate(a: Option<bool>, b: Option<bool>, a_gate: GateRef, b_gate: GateRef) -
             left: a_gate,
             right: b_gate,
         })
+    }
+}
+
+fn not_gate(a_gate: GateRef) -> GateRef {
+    let a = get_constant(a_gate.clone());
+
+    if let Some(a_const) = a {
+        if a_const {
+            GateRef::from(Gate::ConstFalse)
+        } else {
+            GateRef::from(Gate::ConstTrue)
+        }
+    } else {
+        GateRef::from(Gate::Not { value: a_gate })
     }
 }
 
@@ -479,18 +514,8 @@ impl BitBlasting {
                 } else {
                     let bitvector = self.visit(value);
                     let mut replacement: Vec<GateRef> = Vec::new();
-
                     for bit in bitvector {
-                        if self.constant_propagation && is_constant(bit.clone()) {
-                            if *bit == Gate::ConstFalse {
-                                replacement.push(GateRef::from(Gate::ConstTrue));
-                            } else {
-                                assert!(*bit == Gate::ConstTrue);
-                                replacement.push(GateRef::from(Gate::ConstFalse));
-                            }
-                        } else {
-                            replacement.push(GateRef::from(Gate::Not{value:bit}))
-                        }
+                        replacement.push(not_gate(bit));
                     }
                     self.record_mapping(node, replacement)
                 }
@@ -608,6 +633,21 @@ impl BitBlasting {
                         self.record_mapping(node, replacement)
                     }
                 }
+            } Node::Sub { nid: _, left, right } => {
+                if let Some(replacement) = self.query_existence(node) {
+                    replacement
+                } else {
+                    let mut left_operand = self.visit(left);
+                    let mut right_operand = self.visit(right);
+
+                    left_operand.push(GateRef::from(Gate::ConstFalse));
+                    right_operand.push(GateRef::from(Gate::ConstFalse));
+
+                    right_operand = get_2s_complement(right_operand);
+
+                    let replacement: Vec<GateRef> = bitwise_add(left_operand, right_operand);
+                    self.record_mapping(node, replacement)
+                }
             }
             _ => {
                 let replacement: Vec<GateRef> = Vec::new();
@@ -616,8 +656,6 @@ impl BitBlasting {
               //     //buffer.write_all(format!("{} read 2 {} {}\n", nid, get_nid(memory), get_nid(address)).as_bytes())?,
               // Node::Write { nid, memory, address, value } =>
               //     //buffer.write_all(format!("{} write 3 {} {} {}\n", nid, get_nid(memory), get_nid(address), get_nid(value)).as_bytes())?,
-              // Node::Sub { nid, left, right } =>
-              //     //buffer.write_all(format!("{} sub 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Mul {nid, left, right} =>
               //     //buffer.write_all(format!("{} mul 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Div { nid, left, right } =>
@@ -626,8 +664,6 @@ impl BitBlasting {
               //     //buffer.write_all(format!("{} urem 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Ult { nid, left, right } =>
               //     //buffer.write_all(format!("{} ult 1 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
-              // Node::Ite { nid, sort, cond, left, right } =>
-              //     buffer.write_all(format!("{} ite {} {} {} {}\n", nid, get_sort(sort), get_nid(cond), get_nid(left), get_nid(right)).as_bytes())?,
         }
     }
 
