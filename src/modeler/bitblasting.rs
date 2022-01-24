@@ -16,41 +16,47 @@ pub enum Gate {
     ConstTrue,
     ConstFalse,
     InputBit,
-    Not { value: GateRef },
-    And { left: GateRef, right: GateRef },
-    // Bad {
-    //     cond: GateRef,
-    // },
-
-    // Nand {
-    //     left: GateRef,
-    //     right: GateRef,
-    // },
-    // Or {
-    //     left: GateRef,
-    //     right: GateRef,
-    // },
-    // Xnor {
-    //     left: GateRef,
-    //     right: GateRef,
-    // },
-    // Xor {
-    //     left: GateRef,
-    //     right: GateRef,
-    // },
-    // Matriarch1 {
-    //     left: GateRef,
-    //     right: GateRef,
-    // },
+    Not {
+        value: GateRef,
+    },
+    And {
+        left: GateRef,
+        right: GateRef,
+    },
+    Nand {
+        left: GateRef,
+        right: GateRef,
+    },
+    Or {
+        left: GateRef,
+        right: GateRef,
+    },
+    Matriarch1 {
+        left: GateRef,
+        right: GateRef,
+    },
     // Matriarch2  {
     //     left: GateRef,
     //     right: GateRef,
     // },
-    // AuxFullAdder, CarryFullAdder, ResultFullAdder {
-    //     input1: GateRef,
-    //     input2: GateRef,
-    //     input3: GateRef
-    // }
+    CarryHalfAdder {
+        left: GateRef,
+        right: GateRef,
+    },
+    ResultHalfAdder {
+        input1: GateRef,
+        input2: GateRef,
+    },
+    CarryFullAdder {
+        input1: GateRef,
+        input2: GateRef,
+        input3: GateRef,
+    },
+    ResultFullAdder {
+        input1: GateRef,
+        input2: GateRef,
+        input3: GateRef,
+    },
 }
 
 // struct HashableGateRef {
@@ -82,6 +88,18 @@ fn get_constant(gate_type: GateRef) -> Option<bool> {
     }
 }
 
+// fn get_numeric_from_gate(gate_type: GateRef) -> Option<u8> {
+//     if let Some(result) = get_constant(gate_type) {
+//         if result {
+//             Some(1)
+//         } else {
+//             Some(0)
+//         }
+//     } else {
+//         None
+//     }
+// }
+
 fn get_gate_from_boolean(a: bool) -> GateRef {
     if a {
         GateRef::from(Gate::ConstTrue)
@@ -103,6 +121,19 @@ fn are_there_false_constants(const1: Option<bool>, const2: Option<bool>) -> bool
     false
 }
 
+fn are_there_true_constants(const1: Option<bool>, const2: Option<bool>) -> bool {
+    if let Some(a) = const1 {
+        if a {
+            return true;
+        }
+    }
+
+    if let Some(b) = const2 {
+        return b;
+    }
+    false
+}
+
 fn are_both_constants(const1: Option<bool>, const2: Option<bool>) -> bool {
     if let Some(_a) = const1 {
         if let Some(_b) = const2 {
@@ -112,14 +143,13 @@ fn are_both_constants(const1: Option<bool>, const2: Option<bool>) -> bool {
     false
 }
 
-fn get_non_constant_gate(const1: GateRef, const2: GateRef) -> Option<GateRef> {
-    if let Some(_gate) = get_constant(const1.clone()) {
-        Some(const1)
-    } else if let Some(_gate) = get_constant(const2.clone()) {
-        get_constant(const2.clone()).map(|_gate| const2)
-    } else {
-        None
+fn get_non_constant_gate(gates: Vec<GateRef>) -> Option<GateRef> {
+    for gate in gates {
+        if let Some(_g) = get_constant(gate.clone()) {
+            return Some(gate);
+        }
     }
+    None
 }
 
 fn get_replacement_from_constant(sort: &NodeType, value_: u64) -> Vec<GateRef> {
@@ -148,7 +178,7 @@ fn and_gate(a: Option<bool>, b: Option<bool>, a_gate: GateRef, b_gate: GateRef) 
         get_gate_from_boolean(a.unwrap() && b.unwrap())
     } else if are_there_false_constants(a, b) {
         GateRef::from(Gate::ConstFalse)
-    } else if let Some(result) = get_non_constant_gate(a_gate.clone(), b_gate.clone()) {
+    } else if let Some(result) = get_non_constant_gate(vec![a_gate.clone(), b_gate.clone()]) {
         result
     } else {
         GateRef::from(Gate::And {
@@ -156,6 +186,171 @@ fn and_gate(a: Option<bool>, b: Option<bool>, a_gate: GateRef, b_gate: GateRef) 
             right: b_gate,
         })
     }
+}
+
+fn or_gate(a: Option<bool>, b: Option<bool>, a_gate: GateRef, b_gate: GateRef) -> GateRef {
+    if are_both_constants(a, b) {
+        get_gate_from_boolean(a.unwrap() || b.unwrap())
+    } else if are_there_true_constants(a, b) {
+        GateRef::from(Gate::ConstTrue)
+    } else if are_there_false_constants(a, b) {
+        get_non_constant_gate(vec![a_gate, b_gate]).unwrap()
+    } else {
+        GateRef::from(Gate::Or {
+            left: a_gate,
+            right: b_gate,
+        })
+    }
+}
+
+fn xnor_gate(a: Option<bool>, b: Option<bool>, a_gate: GateRef, b_gate: GateRef) -> GateRef {
+    if are_both_constants(a, b) {
+        get_gate_from_boolean(a.unwrap() == b.unwrap())
+    } else if are_there_false_constants(a, b) {
+        let non_constant = get_non_constant_gate(vec![a_gate, b_gate]).unwrap();
+        GateRef::from(Gate::Not {
+            value: non_constant,
+        })
+    } else if let Some(result) = get_non_constant_gate(vec![a_gate.clone(), b_gate.clone()]) {
+        result
+    } else {
+        let not_a = GateRef::from(Gate::Not {
+            value: a_gate.clone(),
+        });
+        let not_b = GateRef::from(Gate::Not {
+            value: b_gate.clone(),
+        });
+
+        let nand1 = GateRef::from(Gate::Nand {
+            left: a_gate,
+            right: b_gate,
+        });
+        let nand2 = GateRef::from(Gate::Nand {
+            left: not_a,
+            right: not_b,
+        });
+
+        GateRef::from(Gate::Nand {
+            left: nand1,
+            right: nand2,
+        })
+    }
+}
+
+fn bitwise_add(left: Vec<GateRef>, right: Vec<GateRef>) -> Vec<GateRef> {
+    fn are_there_2_constants(bit1: GateRef, bit2: GateRef, bit3: GateRef) -> bool {
+        let const1 = get_constant(bit1).unwrap_or(false) as u8;
+        let const2 = get_constant(bit2).unwrap_or(false) as u8;
+        let const3 = get_constant(bit3).unwrap_or(false) as u8;
+        (const1 + const2 + const3) == 2
+    }
+
+    fn get_2_constants(bit1: Option<bool>, bit2: Option<bool>, bit3: Option<bool>) -> (bool, bool) {
+        if let Some(const1) = bit1 {
+            if let Some(const2) = bit2 {
+                (const1, const2)
+            } else if let Some(const3) = bit3 {
+                (const1, const3)
+            } else {
+                panic!("Expecting 2 constants")
+            }
+        } else if let Some(const2) = bit2 {
+            if let Some(const3) = bit3 {
+                (const2, const3)
+            } else {
+                panic!("Expecting 2 constants")
+            }
+        } else {
+            panic!("Expecting 2 constants")
+        }
+    }
+
+    assert!(left.len() == right.len());
+    let mut replacement: Vec<GateRef> = Vec::new();
+    let mut carry: GateRef = GateRef::from(Gate::ConstFalse); // initlaize so compiler not complains
+    let mut is_first = true;
+    for (l_bit, r_bit) in left.iter().zip(right.iter()) {
+        let l_const = get_constant(l_bit.clone());
+        let r_const = get_constant(r_bit.clone());
+        if is_first {
+            // half adders
+            if are_both_constants(l_const, r_const) {
+                carry = get_gate_from_boolean(l_const.unwrap() && r_const.unwrap());
+                replacement.push(get_gate_from_boolean(l_const.unwrap() != r_const.unwrap()));
+            } else if are_there_false_constants(l_const, r_const) {
+                carry = GateRef::from(Gate::ConstFalse);
+                let non_constant =
+                    get_non_constant_gate(vec![l_bit.clone(), r_bit.clone()]).unwrap();
+                replacement.push(non_constant);
+            } else if are_there_true_constants(l_const, r_const) {
+                let non_constant =
+                    get_non_constant_gate(vec![l_bit.clone(), r_bit.clone()]).unwrap();
+                carry = non_constant.clone();
+                replacement.push(GateRef::from(Gate::Not {
+                    value: non_constant,
+                }));
+            } else {
+                carry = GateRef::from(Gate::CarryHalfAdder {
+                    left: (*l_bit).clone(),
+                    right: (*r_bit).clone(),
+                });
+                replacement.push(GateRef::from(Gate::ResultHalfAdder {
+                    input1: (*l_bit).clone(),
+                    input2: (*r_bit).clone(),
+                }));
+            }
+            is_first = false;
+        // Full adders
+        } else if are_both_constants(l_const, r_const) && is_constant(carry.clone()) {
+            let carry_const = get_constant(carry.clone());
+            let result = ((l_const.unwrap() as u64)
+                + (r_const.unwrap() as u64)
+                + (carry_const.unwrap() as u64))
+                % 2;
+
+            replacement.push(get_gate_from_constant_bit(result));
+
+            let temp = ((l_const.unwrap() as u8)
+                + (r_const.unwrap() as u8)
+                + (carry_const.unwrap() as u8))
+                > 1;
+            carry = get_gate_from_boolean(temp);
+        } else if are_there_2_constants((*l_bit).clone(), (*r_bit).clone(), carry.clone()) {
+            let carry_const = get_constant(carry.clone());
+            let (const1, const2) = get_2_constants(l_const, r_const, carry_const);
+            if let Some(non_const) =
+                get_non_constant_gate(vec![(*l_bit).clone(), (*r_bit).clone(), carry.clone()])
+            {
+                if const1 && const2 {
+                    carry = GateRef::from(Gate::ConstTrue);
+                    replacement.push(non_const);
+                } else if const1 != const2 {
+                    carry = non_const.clone();
+                    replacement.push(GateRef::from(Gate::Not { value: non_const }));
+                } else {
+                    carry = GateRef::from(Gate::ConstFalse);
+                    replacement.push(non_const);
+                }
+            } else {
+                panic!("bug in building addition circuit")
+            }
+        } else {
+            // no constant propagation is possible
+            replacement.push(GateRef::from(Gate::ResultFullAdder {
+                input1: (*l_bit).clone(),
+                input2: (*r_bit).clone(),
+                input3: carry.clone(),
+            }));
+
+            carry = GateRef::from(Gate::CarryFullAdder {
+                input1: (*l_bit).clone(),
+                input2: (*r_bit).clone(),
+                input3: carry.clone(),
+            });
+        }
+    }
+
+    replacement
 }
 
 pub struct BitBlasting {
@@ -190,17 +385,14 @@ impl BitBlasting {
 
     fn fold_bitwise_gate<F>(
         &mut self,
-        node: &NodeRef,
-        left_operand: &NodeRef,
-        right_operand: &NodeRef,
+        left: Vec<GateRef>,
+        right: Vec<GateRef>,
         f_gate: F,
         _f_name: &str,
     ) -> Vec<GateRef>
     where
         F: Fn(Option<bool>, Option<bool>, GateRef, GateRef) -> GateRef,
     {
-        let left = self.visit(left_operand);
-        let right = self.visit(right_operand);
         assert!(left.len() == right.len());
 
         let mut replacement: Vec<GateRef> = Vec::new();
@@ -222,7 +414,23 @@ impl BitBlasting {
                 }))
             }
         }
-        self.record_mapping(node, replacement)
+        replacement
+    }
+
+    fn fold_word_gate<F>(&mut self, word: Vec<GateRef>, f_gate: F, _f_name: &str) -> Vec<GateRef>
+    where
+        F: Fn(Option<bool>, Option<bool>, GateRef, GateRef) -> GateRef,
+    {
+        assert!(!word.is_empty());
+
+        let mut current = word[0].clone();
+        for w in word.iter().skip(1) {
+            let a = get_constant(current.clone());
+            let b = get_constant((*w).clone());
+            current = f_gate(a, b, current, (*w).clone());
+        }
+
+        vec![current]
     }
 
     fn visit(&mut self, node: &NodeRef) -> Vec<GateRef> {
@@ -297,7 +505,10 @@ impl BitBlasting {
                 if let Some(replacement) = self.query_existence(node) {
                     replacement
                 } else {
-                    self.fold_bitwise_gate(node, left, right, and_gate, "AND")
+                    let left_operand = self.visit(left);
+                    let right_operand = self.visit(right);
+                    let replacement = self.fold_bitwise_gate(left_operand, right_operand, and_gate, "AND");
+                    self.record_mapping(node, replacement)
                 }
             } Node::Ext { nid: _, from, value } => {
                 if let Some(replacement) = self.query_existence(node) {
@@ -309,6 +520,94 @@ impl BitBlasting {
                     }
                     self.record_mapping(node, replacement)
                 }
+            } Node::Eq { nid: _, left, right } => {
+                if let Some(replacement) = self.query_existence(node) {
+                    replacement
+                } else {
+                    let left_operand = self.visit(left);
+                    let right_operand = self.visit(right);
+                    let temp_word = self.fold_bitwise_gate(left_operand, right_operand, xnor_gate, "XNOR");
+                    let replacement = self.fold_word_gate(temp_word, and_gate, "WORD-AND");
+                    self.record_mapping(node, replacement)
+                }
+            } Node::Add { nid: _, left, right } => {
+                if let Some(replacement) = self.query_existence(node) {
+                    replacement
+                } else {
+                    let left_operand = self.visit(left);
+                    let right_operand = self.visit(right);
+                    let replacement = bitwise_add(left_operand, right_operand);
+                    self.record_mapping(node, replacement)
+                }
+            } Node::Ite {nid: _, sort: _, cond, left, right} => {
+                if let Some(replacement) = self.query_existence(node) {
+                    replacement
+                } else {
+                    let cond_operand = self.visit(cond);
+                    assert!(cond_operand.len() == 1);
+                    if let Some(cond_const) = get_constant(cond_operand[0].clone()) {
+                        if cond_const {
+                            let left_operand = self.visit(left);
+                            self.record_mapping(node,  left_operand)
+                        } else{
+                            let right_operand = self.visit(right);
+                            self.record_mapping(node, right_operand)
+                        }
+                    } else {
+                        let left_operand = self.visit(left);
+                        let right_operand = self.visit(right);
+                        assert!(left_operand.len() == right_operand.len());
+
+                        let mut replacement: Vec<GateRef> = Vec::new();
+                        for i in 0..left_operand.len() {
+                            let left_bit = get_constant(left_operand[i].clone());
+                            let right_bit = get_constant(right_operand[i].clone());
+
+                            if are_both_constants(left_bit, right_bit) {
+                                let const_true_bit = get_constant(left_operand[i].clone()).unwrap();
+                                let const_false_bit = get_constant(right_operand[i].clone()).unwrap();
+
+                                if const_true_bit == const_false_bit {
+                                    replacement.push(left_operand[i].clone());
+                                } else if const_true_bit {
+                                    replacement.push(cond_operand[0].clone())
+                                } else {
+                                    replacement.push(GateRef::from(Gate::Not{value: cond_operand[0].clone()}))
+                                }
+                            } else {
+                                let true_bit: GateRef;
+                                let false_bit: GateRef;
+
+                                if let Some(const_true) = get_constant(left_operand[i].clone()) {
+                                    if const_true {
+                                        true_bit = cond_operand[0].clone();
+                                    } else {
+                                        true_bit = GateRef::from(Gate::Not{value: cond_operand[0].clone()});
+                                     }
+                                } else {
+                                    true_bit = GateRef::from(Gate::And{left: left_operand[i].clone(), right: cond_operand[0].clone()});
+                                }
+
+                                if let Some(const_false) = get_constant(right_operand[i].clone()) {
+                                    if const_false {
+                                        false_bit = GateRef::from(Gate::Not{value: cond_operand[0].clone()});
+                                    } else {
+                                        false_bit = GateRef::from(Gate::ConstFalse);
+                                    }
+                                } else {
+                                    false_bit = GateRef::from(Gate::Matriarch1{left: cond_operand[0].clone(), right: right_operand[i].clone()});
+                                }
+
+                                let true_bit_const = get_constant(true_bit.clone());
+                                let false_bit_const = get_constant(false_bit.clone());
+                                replacement.push(or_gate(true_bit_const, false_bit_const, true_bit, false_bit));
+                            }
+
+
+                        }
+                        self.record_mapping(node, replacement)
+                    }
+                }
             }
             _ => {
                 let replacement: Vec<GateRef> = Vec::new();
@@ -317,8 +616,6 @@ impl BitBlasting {
               //     //buffer.write_all(format!("{} read 2 {} {}\n", nid, get_nid(memory), get_nid(address)).as_bytes())?,
               // Node::Write { nid, memory, address, value } =>
               //     //buffer.write_all(format!("{} write 3 {} {} {}\n", nid, get_nid(memory), get_nid(address), get_nid(value)).as_bytes())?,
-              // Node::Add { nid, left, right } =>
-              //     //buffer.write_all(format!("{} add 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Sub { nid, left, right } =>
               //     //buffer.write_all(format!("{} sub 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Mul {nid, left, right} =>
@@ -331,8 +628,6 @@ impl BitBlasting {
               //     //buffer.write_all(format!("{} ult 1 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Ite { nid, sort, cond, left, right } =>
               //     buffer.write_all(format!("{} ite {} {} {} {}\n", nid, get_sort(sort), get_nid(cond), get_nid(left), get_nid(right)).as_bytes())?,
-              // Node::Eq { nid, left, right } =>
-              //     buffer.write_all(format!("{} eq 1 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
         }
     }
 
