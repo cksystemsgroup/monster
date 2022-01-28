@@ -109,6 +109,11 @@ fn get_2s_complement(bitvector: Vec<GateRef>) -> Vec<GateRef> {
     bitwise_add(inverted_bits, bitvector_1)
 }
 
+fn bitwise_substraction(left: Vec<GateRef>, right: Vec<GateRef>) -> Vec<GateRef> {
+    let right_2s_complement = get_2s_complement(right);
+    bitwise_add(left, right_2s_complement)
+}
+
 // fn get_numeric_from_gate(gate_type: GateRef) -> Option<u8> {
 //     if let Some(result) = get_constant(gate_type) {
 //         if result {
@@ -388,6 +393,67 @@ fn bitwise_add(left: Vec<GateRef>, right: Vec<GateRef>) -> Vec<GateRef> {
     replacement
 }
 
+fn bitwise_multiplication(left: Vec<GateRef>, right: Vec<GateRef>) -> Vec<GateRef> {
+    fn mutiply_by_digit(left_operand: &[GateRef], digit: &GateRef, shift: usize) -> Vec<GateRef> {
+        let mut result: Vec<GateRef> = Vec::new();
+
+        for _ in 0..shift {
+            result.push(GateRef::from(Gate::ConstFalse));
+        }
+
+        if let Some(const_digit) = get_constant(digit.clone()) {
+            if const_digit {
+                for g in left_operand {
+                    result.push(g.clone());
+                }
+            } else {
+                for _ in left_operand {
+                    result.push(GateRef::from(Gate::ConstFalse));
+                }
+            }
+        } else {
+            for g in left_operand {
+                if let Some(const_g) = get_constant((*g).clone()) {
+                    if const_g {
+                        result.push(digit.clone());
+                    } else {
+                        result.push(GateRef::from(Gate::ConstFalse));
+                    }
+                } else {
+                    result.push(GateRef::from(Gate::And {
+                        left: g.clone(),
+                        right: digit.clone(),
+                    }));
+                }
+            }
+        }
+
+        result
+    }
+
+    fn add_front_zeros_padding(bits: &mut Vec<GateRef>, expected_max_size: usize) {
+        while bits.len() < expected_max_size {
+            bits.push(GateRef::from(Gate::ConstFalse));
+        }
+    }
+
+    // main algorithm for multiplication
+    let expected_max_size = 2 * left.len() - 1;
+    let mut replacement: Vec<GateRef> = Vec::new();
+
+    for _ in 0..expected_max_size {
+        replacement.push(GateRef::from(Gate::ConstFalse));
+    }
+    for (i, digit) in right.iter().enumerate() {
+        let mut temp_result = mutiply_by_digit(&left, digit, i);
+
+        add_front_zeros_padding(&mut temp_result, expected_max_size);
+        replacement = bitwise_add(replacement, temp_result);
+    }
+
+    replacement[..right.len()].to_vec()
+}
+
 pub struct BitBlasting {
     mapping: HashMap<HashableNodeRef, Vec<GateRef>>,
     constant_propagation: bool,
@@ -480,174 +546,162 @@ impl BitBlasting {
     }
 
     fn process(&mut self, node: &NodeRef) -> Vec<GateRef> {
+        if let Some(replacement) = self.query_existence(node) {
+            return replacement;
+        }
         match &*node.borrow() {
             Node::Const { nid: _, sort, imm } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let replacement = get_replacement_from_constant(sort, *imm);
-                    self.record_mapping(node, replacement)
-                }
+
+                let replacement = get_replacement_from_constant(sort, *imm);
+                self.record_mapping(node, replacement)
             } Node::Input { nid: _, sort, name: _ } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let replacement = get_replacement_from_unique_gate(sort, Gate::InputBit);
-                    self.record_mapping(node, replacement)
-                }
+
+                let replacement = get_replacement_from_unique_gate(sort, Gate::InputBit);
+                self.record_mapping(node, replacement)
 
             } Node::State { nid: _, sort, init, name: _ } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                }else {
-                    let replacement;
-                    if let Some(value) = init {
-                        replacement = self.visit(value);
-                    } else {
-                        replacement = get_replacement_from_unique_gate(sort, Gate::ConstFalse);
-                    }
-                    self.record_mapping(node, replacement)
+
+                let replacement;
+                if let Some(value) = init {
+                    replacement = self.visit(value);
+                } else {
+                    replacement = get_replacement_from_unique_gate(sort, Gate::ConstFalse);
                 }
+                self.record_mapping(node, replacement)
+
             }  Node::Not { nid: _, value } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let bitvector = self.visit(value);
-                    let mut replacement: Vec<GateRef> = Vec::new();
-                    for bit in bitvector {
-                        replacement.push(not_gate(bit));
-                    }
-                    self.record_mapping(node, replacement)
+
+                let bitvector = self.visit(value);
+                let mut replacement: Vec<GateRef> = Vec::new();
+                for bit in bitvector {
+                    replacement.push(not_gate(bit));
                 }
+                self.record_mapping(node, replacement)
             }  Node::Bad { nid: _, cond, name: _ } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let replacement = self.visit(cond);
-                    self.record_mapping(node, replacement)
-                }
+
+                let replacement = self.visit(cond);
+                self.record_mapping(node, replacement)
             } Node::And { nid: _, left, right } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let left_operand = self.visit(left);
-                    let right_operand = self.visit(right);
-                    let replacement = self.fold_bitwise_gate(left_operand, right_operand, and_gate, "AND");
-                    self.record_mapping(node, replacement)
-                }
+
+                let left_operand = self.visit(left);
+                let right_operand = self.visit(right);
+                let replacement = self.fold_bitwise_gate(left_operand, right_operand, and_gate, "AND");
+                self.record_mapping(node, replacement)
             } Node::Ext { nid: _, from, value } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let mut replacement: Vec<GateRef> = self.visit(value);
-                    while replacement.len() < get_bitsize(from) {
-                        replacement.push(GateRef::from(Gate::ConstFalse));
-                    }
-                    self.record_mapping(node, replacement)
+
+                let mut replacement: Vec<GateRef> = self.visit(value);
+                while replacement.len() < get_bitsize(from) {
+                    replacement.push(GateRef::from(Gate::ConstFalse));
                 }
+                self.record_mapping(node, replacement)
             } Node::Eq { nid: _, left, right } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let left_operand = self.visit(left);
-                    let right_operand = self.visit(right);
-                    let temp_word = self.fold_bitwise_gate(left_operand, right_operand, xnor_gate, "XNOR");
-                    let replacement = self.fold_word_gate(temp_word, and_gate, "WORD-AND");
-                    self.record_mapping(node, replacement)
-                }
+
+                let left_operand = self.visit(left);
+                let right_operand = self.visit(right);
+                let temp_word = self.fold_bitwise_gate(left_operand, right_operand, xnor_gate, "XNOR");
+                let replacement = self.fold_word_gate(temp_word, and_gate, "WORD-AND");
+                self.record_mapping(node, replacement)
             } Node::Add { nid: _, left, right } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
+
+                let left_operand = self.visit(left);
+                let right_operand = self.visit(right);
+                let replacement = bitwise_add(left_operand, right_operand);
+                self.record_mapping(node, replacement)
+
+            } Node::Ite {nid: _, sort: _, cond, left, right} => {
+
+                let cond_operand = self.visit(cond);
+                assert!(cond_operand.len() == 1);
+                if let Some(cond_const) = get_constant(cond_operand[0].clone()) {
+                    if cond_const {
+                        let left_operand = self.visit(left);
+                        self.record_mapping(node,  left_operand)
+                    } else{
+                        let right_operand = self.visit(right);
+                        self.record_mapping(node, right_operand)
+                    }
                 } else {
                     let left_operand = self.visit(left);
                     let right_operand = self.visit(right);
-                    let replacement = bitwise_add(left_operand, right_operand);
-                    self.record_mapping(node, replacement)
-                }
-            } Node::Ite {nid: _, sort: _, cond, left, right} => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let cond_operand = self.visit(cond);
-                    assert!(cond_operand.len() == 1);
-                    if let Some(cond_const) = get_constant(cond_operand[0].clone()) {
-                        if cond_const {
-                            let left_operand = self.visit(left);
-                            self.record_mapping(node,  left_operand)
-                        } else{
-                            let right_operand = self.visit(right);
-                            self.record_mapping(node, right_operand)
-                        }
-                    } else {
-                        let left_operand = self.visit(left);
-                        let right_operand = self.visit(right);
-                        assert!(left_operand.len() == right_operand.len());
+                    assert!(left_operand.len() == right_operand.len());
 
-                        let mut replacement: Vec<GateRef> = Vec::new();
-                        for i in 0..left_operand.len() {
-                            let left_bit = get_constant(left_operand[i].clone());
-                            let right_bit = get_constant(right_operand[i].clone());
+                    let mut replacement: Vec<GateRef> = Vec::new();
+                    for i in 0..left_operand.len() {
+                        let left_bit = get_constant(left_operand[i].clone());
+                        let right_bit = get_constant(right_operand[i].clone());
 
-                            if are_both_constants(left_bit, right_bit) {
-                                let const_true_bit = get_constant(left_operand[i].clone()).unwrap();
-                                let const_false_bit = get_constant(right_operand[i].clone()).unwrap();
+                        if are_both_constants(left_bit, right_bit) {
+                            let const_true_bit = get_constant(left_operand[i].clone()).unwrap();
+                            let const_false_bit = get_constant(right_operand[i].clone()).unwrap();
 
-                                if const_true_bit == const_false_bit {
-                                    replacement.push(left_operand[i].clone());
-                                } else if const_true_bit {
-                                    replacement.push(cond_operand[0].clone())
-                                } else {
-                                    replacement.push(GateRef::from(Gate::Not{value: cond_operand[0].clone()}))
-                                }
+                            if const_true_bit == const_false_bit {
+                                replacement.push(left_operand[i].clone());
+                            } else if const_true_bit {
+                                replacement.push(cond_operand[0].clone())
                             } else {
-                                let true_bit: GateRef;
-                                let false_bit: GateRef;
+                                replacement.push(GateRef::from(Gate::Not{value: cond_operand[0].clone()}))
+                            }
+                        } else {
+                            let true_bit: GateRef;
+                            let false_bit: GateRef;
 
-                                if let Some(const_true) = get_constant(left_operand[i].clone()) {
-                                    if const_true {
-                                        true_bit = cond_operand[0].clone();
-                                    } else {
-                                        true_bit = GateRef::from(Gate::Not{value: cond_operand[0].clone()});
-                                     }
+                            if let Some(const_true) = get_constant(left_operand[i].clone()) {
+                                if const_true {
+                                    true_bit = cond_operand[0].clone();
                                 } else {
-                                    true_bit = GateRef::from(Gate::And{left: left_operand[i].clone(), right: cond_operand[0].clone()});
-                                }
-
-                                if let Some(const_false) = get_constant(right_operand[i].clone()) {
-                                    if const_false {
-                                        false_bit = GateRef::from(Gate::Not{value: cond_operand[0].clone()});
-                                    } else {
-                                        false_bit = GateRef::from(Gate::ConstFalse);
+                                    true_bit = GateRef::from(Gate::Not{value: cond_operand[0].clone()});
                                     }
-                                } else {
-                                    false_bit = GateRef::from(Gate::Matriarch1{left: cond_operand[0].clone(), right: right_operand[i].clone()});
-                                }
-
-                                let true_bit_const = get_constant(true_bit.clone());
-                                let false_bit_const = get_constant(false_bit.clone());
-                                replacement.push(or_gate(true_bit_const, false_bit_const, true_bit, false_bit));
+                            } else {
+                                true_bit = GateRef::from(Gate::And{left: left_operand[i].clone(), right: cond_operand[0].clone()});
                             }
 
+                            if let Some(const_false) = get_constant(right_operand[i].clone()) {
+                                if const_false {
+                                    false_bit = GateRef::from(Gate::Not{value: cond_operand[0].clone()});
+                                } else {
+                                    false_bit = GateRef::from(Gate::ConstFalse);
+                                }
+                            } else {
+                                false_bit = GateRef::from(Gate::Matriarch1{left: cond_operand[0].clone(), right: right_operand[i].clone()});
+                            }
 
+                            let true_bit_const = get_constant(true_bit.clone());
+                            let false_bit_const = get_constant(false_bit.clone());
+                            replacement.push(or_gate(true_bit_const, false_bit_const, true_bit, false_bit));
                         }
-                        self.record_mapping(node, replacement)
+
+
                     }
-                }
-            } Node::Sub { nid: _, left, right } => {
-                if let Some(replacement) = self.query_existence(node) {
-                    replacement
-                } else {
-                    let mut left_operand = self.visit(left);
-                    let mut right_operand = self.visit(right);
-
-                    left_operand.push(GateRef::from(Gate::ConstFalse));
-                    right_operand.push(GateRef::from(Gate::ConstFalse));
-
-                    right_operand = get_2s_complement(right_operand);
-
-                    let replacement: Vec<GateRef> = bitwise_add(left_operand, right_operand);
                     self.record_mapping(node, replacement)
                 }
+            } Node::Sub { nid: _, left, right } => {
+
+                let left_operand = self.visit(left);
+                let right_operand = self.visit(right);
+
+                let replacement: Vec<GateRef> = bitwise_substraction(left_operand, right_operand);
+                self.record_mapping(node, replacement)
+            } Node::Ult { nid: _, left, right } => {
+                let mut left_operand = self.visit(left);
+                let mut right_operand = self.visit(right);
+                left_operand.push(GateRef::from(Gate::ConstFalse));
+                right_operand.push(GateRef::from(Gate::ConstTrue));
+
+                let substracted_bitvectors = bitwise_substraction(left_operand, right_operand);
+
+                if let Some(last_element) = substracted_bitvectors.last() {
+                    let replacement: Vec<GateRef> = vec![(*last_element).clone()];
+                    self.record_mapping(node, replacement)
+
+                } else {
+                    panic!("Error in ULT, cant get MSB!")
+                }
+
+            } Node::Mul {nid: _, left, right} => {
+                let left_operand = self.visit(left);
+                let right_operand = self.visit(right);
+                let replacement = bitwise_multiplication(left_operand, right_operand);
+                self.record_mapping(node, replacement)
             }
             _ => {
                 let replacement: Vec<GateRef> = Vec::new();
@@ -656,14 +710,10 @@ impl BitBlasting {
               //     //buffer.write_all(format!("{} read 2 {} {}\n", nid, get_nid(memory), get_nid(address)).as_bytes())?,
               // Node::Write { nid, memory, address, value } =>
               //     //buffer.write_all(format!("{} write 3 {} {} {}\n", nid, get_nid(memory), get_nid(address), get_nid(value)).as_bytes())?,
-              // Node::Mul {nid, left, right} =>
-              //     //buffer.write_all(format!("{} mul 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Div { nid, left, right } =>
               //     //buffer.write_all(format!("{} udiv 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
               // Node::Rem { nid, left, right } =>
               //     //buffer.write_all(format!("{} urem 2 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
-              // Node::Ult { nid, left, right } =>
-              //     //buffer.write_all(format!("{} ult 1 {} {}\n", nid, get_nid(left), get_nid(right)).as_bytes())?,
         }
     }
 
