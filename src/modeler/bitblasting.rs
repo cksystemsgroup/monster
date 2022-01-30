@@ -37,10 +37,6 @@ pub enum Gate {
         cond: GateRef,
         right: GateRef,
     },
-    // Matriarch2  {
-    //     left: GateRef,
-    //     right: GateRef,
-    // },
     CarryHalfAdder {
         left: GateRef,
         right: GateRef,
