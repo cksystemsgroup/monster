@@ -352,18 +352,19 @@ fn xnor_gate(a: Option<bool>, b: Option<bool>, a_gate: &GateRef, b_gate: &GateRe
 }
 
 pub struct BitBlasting<'a> {
-    mapping: HashMap<HashableNodeRef, Vec<GateRef>>,
-    constant_propagation: bool,
-    constraints: HashMap<HashableGateRef, bool>,
-    word_size: u64,
-    model: &'a Model,
-    addresses_gates: Vec<Vec<GateRef>>,
+    mapping: HashMap<HashableNodeRef, Vec<GateRef>>, // maps a btor2 operator to its resulting bitvector of gates
+    constant_propagation: bool, // TODO: make this flag work. Currently we always perform constant propagation
+    constraints: HashMap<HashableGateRef, bool>, // this is for remainder and division, these are constraint based.
+    word_size: u64, // I use this attribute as a variable because maybe we will do variable-length addresses? I only use this for reads and writes.
+    model: &'a Model, // BTOR2 model
+    addresses_gates: Vec<Vec<GateRef>>, // memory addresses represented as vectors of (constant-)gates
+    mapping_adders: HashMap<HashableGateRef, GateRef>,
 }
 
 impl<'a> BitBlasting<'a> {
     fn bitwise_equal(&self, left_operand: &[GateRef], right_operand: &[GateRef]) -> Vec<GateRef> {
         let temp_word = self.fold_bitwise_gate(left_operand, right_operand, xnor_gate, "XNOR");
-        self.fold_word_gate(temp_word, and_gate, "WORD-AND")
+        self.fold_word_gate(&temp_word, and_gate, "WORD-AND")
     }
 
     fn get_2s_complement(&mut self, bitvector: Vec<GateRef>) -> Vec<GateRef> {
@@ -458,10 +459,13 @@ impl<'a> BitBlasting<'a> {
                         left: (*l_bit).clone(),
                         right: (*r_bit).clone(),
                     });
-                    replacement.push(GateRef::from(Gate::ResultHalfAdder {
+                    let result = GateRef::from(Gate::ResultHalfAdder {
                         input1: (*l_bit).clone(),
                         input2: (*r_bit).clone(),
-                    }));
+                    });
+                    self.record_mapping_adders(&carry, &result);
+                    self.record_mapping_adders(&result, &carry);
+                    replacement.push(result);
                 }
                 is_first = false;
             // Full adders
@@ -500,21 +504,24 @@ impl<'a> BitBlasting<'a> {
                 }
             } else {
                 // no constant propagation is possible
-                replacement.push(GateRef::from(Gate::ResultFullAdder {
+                let result = GateRef::from(Gate::ResultFullAdder {
                     input1: (*l_bit).clone(),
                     input2: (*r_bit).clone(),
                     input3: carry.clone(),
-                }));
-
+                });
                 carry = GateRef::from(Gate::CarryFullAdder {
                     input1: (*l_bit).clone(),
                     input2: (*r_bit).clone(),
                     input3: carry.clone(),
                 });
+                self.record_mapping_adders(&carry, &result);
+                self.record_mapping_adders(&result, &carry);
+                replacement.push(result);
             }
         }
 
         if fix_last_carry {
+            // when performing division (remainder) we need to set this constraint so the combinatorics of overflow is not doable.
             self.record_constraint(&carry, false);
         }
 
@@ -588,8 +595,8 @@ impl<'a> BitBlasting<'a> {
 
     fn divide(
         &mut self,
-        dividend: Vec<GateRef>,
-        divisor: Vec<GateRef>,
+        dividend: &[GateRef],
+        divisor: &[GateRef],
     ) -> (Vec<GateRef>, Vec<GateRef>) {
         // check if division can be done at word level
         if get_non_constant_gate(&dividend).is_none() && get_non_constant_gate(&divisor).is_none() {
@@ -649,6 +656,7 @@ impl<'a> BitBlasting<'a> {
             word_size: word_size_,
             model: model_,
             addresses_gates: get_addresses_gates(model_, &word_size_),
+            mapping_adders: HashMap::new(),
         }
     }
 
@@ -656,6 +664,18 @@ impl<'a> BitBlasting<'a> {
         let key = HashableNodeRef::from(node.clone());
         assert!(!self.mapping.contains_key(&key));
         self.mapping.insert(key, replacement).unwrap()
+    }
+
+    fn record_mapping_adders(&mut self, gate: &GateRef, value: &GateRef) {
+        let key = HashableGateRef {
+            value: gate.clone(),
+        };
+
+        if let std::collections::hash_map::Entry::Vacant(e) = self.mapping_adders.entry(key) {
+            e.insert(value.clone());
+        } else {
+            panic!("Trying to set constraint, but constraint already exists")
+        }
     }
 
     fn record_constraint(&mut self, gate: &GateRef, value: bool) {
@@ -713,7 +733,7 @@ impl<'a> BitBlasting<'a> {
         replacement
     }
 
-    fn fold_word_gate<F>(&self, word: Vec<GateRef>, f_gate: F, _f_name: &str) -> Vec<GateRef>
+    fn fold_word_gate<F>(&self, word: &[GateRef], f_gate: F, _f_name: &str) -> Vec<GateRef>
     where
         F: Fn(Option<bool>, Option<bool>, &GateRef, &GateRef) -> GateRef,
     {
@@ -818,7 +838,7 @@ impl<'a> BitBlasting<'a> {
                 let right_operand = self.visit(right);
                 let temp_word =
                     self.fold_bitwise_gate(&left_operand, &right_operand, xnor_gate, "XNOR");
-                let replacement = self.fold_word_gate(temp_word, and_gate, "WORD-AND");
+                let replacement = self.fold_word_gate(&temp_word, and_gate, "WORD-AND");
                 self.record_mapping(node, replacement)
             }
             Node::Add {
@@ -966,7 +986,7 @@ impl<'a> BitBlasting<'a> {
             } => {
                 let left_operand = self.visit(left);
                 let right_operand = self.visit(right);
-                let replacement = self.divide(left_operand, right_operand).0;
+                let replacement = self.divide(&left_operand, &right_operand).0;
                 self.record_mapping(node, replacement)
             }
             Node::Rem {
@@ -976,7 +996,7 @@ impl<'a> BitBlasting<'a> {
             } => {
                 let left_operand = self.visit(left);
                 let right_operand = self.visit(right);
-                let replacement = self.divide(left_operand, right_operand).1;
+                let replacement = self.divide(&left_operand, &right_operand).1;
                 self.record_mapping(node, replacement)
             }
             Node::Read {
