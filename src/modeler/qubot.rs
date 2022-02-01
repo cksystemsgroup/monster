@@ -401,11 +401,16 @@ impl<'a> Qubot<'a> {
         }
 
         // apply constraints
-
         for (gate, value) in self.bitblasting.constraints.iter() {
             let qubit = self.mapping.get(gate).unwrap();
             self.qubo.fix_variable(qubit, *value);
         }
+
+        // fix true constants
+        self.qubo.fix_variable(&self.const_true_qubit, true);
+
+        // fix false constants
+        self.qubo.fix_variable(&self.const_false_qubit, false);
 
         bad_state_qubits
     }

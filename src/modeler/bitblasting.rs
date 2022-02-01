@@ -359,6 +359,7 @@ pub struct BitBlasting<'a> {
     model: &'a Model, // BTOR2 model
     addresses_gates: Vec<Vec<GateRef>>, // memory addresses represented as vectors of (constant-)gates
     pub mapping_adders: HashMap<HashableGateRef, GateRef>,
+    pub input_gates: Vec<(NodeRef, Vec<GateRef>)>,
 }
 
 impl<'a> BitBlasting<'a> {
@@ -657,6 +658,7 @@ impl<'a> BitBlasting<'a> {
             model: model_,
             addresses_gates: get_addresses_gates(model_, &word_size_),
             mapping_adders: HashMap::new(),
+            input_gates: Vec::new(),
         }
     }
 
@@ -775,6 +777,7 @@ impl<'a> BitBlasting<'a> {
                 name: _,
             } => {
                 let replacement = get_replacement_from_unique_gate(sort, Gate::InputBit);
+                self.input_gates.push((node.clone(), replacement.clone()));
                 self.record_mapping(node, replacement)
             }
             Node::State {
