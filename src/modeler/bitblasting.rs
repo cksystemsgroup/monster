@@ -6,12 +6,12 @@ use std::rc::Rc;
 
 // public interface
 
-pub fn bitblast_model(model: Model, constant_propagation: bool, word_size: u64) -> Vec<GateRef> {
-    let mut bitblasting = BitBlasting::new(&model, constant_propagation, word_size);
-    bitblasting.process_model(&model)
-}
+// pub fn bitblast_model(model: Model, constant_propagation: bool, word_size: u64) -> Vec<GateRef> {
+//     let mut bitblasting = BitBlasting::new(&model, constant_propagation, word_size);
+//     bitblasting.process_model(&model)
+// }
 
-type GateRef = Rc<RefCell<Gate>>;
+pub type GateRef = Rc<RefCell<Gate>>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Gate {
@@ -65,7 +65,7 @@ impl From<Gate> for GateRef {
 
 #[derive(Debug)]
 pub struct HashableGateRef {
-    value: Rc<RefCell<Gate>>,
+    value: GateRef,
 }
 
 impl Eq for HashableGateRef {}
@@ -358,7 +358,7 @@ pub struct BitBlasting<'a> {
     word_size: u64, // I use this attribute as a variable because maybe we will do variable-length addresses? I only use this for reads and writes.
     model: &'a Model, // BTOR2 model
     addresses_gates: Vec<Vec<GateRef>>, // memory addresses represented as vectors of (constant-)gates
-    mapping_adders: HashMap<HashableGateRef, GateRef>,
+    pub mapping_adders: HashMap<HashableGateRef, GateRef>,
 }
 
 impl<'a> BitBlasting<'a> {

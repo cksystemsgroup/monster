@@ -14,6 +14,7 @@ pub mod bitblasting;
 pub mod builder;
 pub mod memory;
 pub mod optimize;
+pub mod qubot;
 pub mod unroller;
 
 pub type Nid = u64;

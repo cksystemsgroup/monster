@@ -6,10 +6,11 @@ use bytesize::ByteSize;
 use cli::{expect_arg, expect_optional_arg, LogLevel};
 use env_logger::{Env, TimestampPrecision};
 use log::info;
-use modeler::bitblasting::bitblast_model;
+use modeler::bitblasting::BitBlasting;
 use modeler::builder::generate_model;
 use modeler::memory::replace_memory;
 use modeler::optimize::fold_constants;
+use modeler::qubot::call_qubot;
 use modeler::unroller::{renumber_model, unroll_model};
 use modeler::write_model;
 use monster::{
@@ -212,7 +213,10 @@ fn main() -> Result<()> {
 
             if let Some(do_bitblasting) = bitblasting_arg {
                 if do_bitblasting {
-                    bitblast_model(model, true, 64); // TODO: ask parameter to determine if bitblasting should do constant propagation, now it always do constant propagation
+                    let mut bitblasting = BitBlasting::new(&model, true, 64);
+                    let bad_states = bitblasting.process_model(&model);
+                    // let bad_states = bitblast_model(model, true, 64); // TODO: ask parameter to determine if bitblasting should do constant propagation, now it always do constant propagation
+                    call_qubot(&bitblasting, &bad_states);
                 }
             }
             Ok(())
