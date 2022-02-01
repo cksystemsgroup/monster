@@ -360,6 +360,7 @@ pub struct BitBlasting<'a> {
     addresses_gates: Vec<Vec<GateRef>>, // memory addresses represented as vectors of (constant-)gates
     pub mapping_adders: HashMap<HashableGateRef, GateRef>,
     pub input_gates: Vec<(NodeRef, Vec<GateRef>)>,
+    pub gates_to_bad_nids: HashMap<HashableGateRef, NodeRef>,
 }
 
 impl<'a> BitBlasting<'a> {
@@ -659,6 +660,7 @@ impl<'a> BitBlasting<'a> {
             addresses_gates: get_addresses_gates(model_, &word_size_),
             mapping_adders: HashMap::new(),
             input_gates: Vec::new(),
+            gates_to_bad_nids: HashMap::new(),
         }
     }
 
@@ -1176,6 +1178,9 @@ impl<'a> BitBlasting<'a> {
             let bitblasted_bad_state = self.process(node);
             assert!(bitblasted_bad_state.len() == 1);
             bad_state_gates.push(bitblasted_bad_state[0].clone());
+
+            let key = HashableGateRef::from(bitblasted_bad_state[0].clone());
+            self.gates_to_bad_nids.insert(key, node.clone());
         }
         bad_state_gates
     }
