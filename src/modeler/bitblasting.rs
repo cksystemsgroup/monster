@@ -354,7 +354,7 @@ fn xnor_gate(a: Option<bool>, b: Option<bool>, a_gate: &GateRef, b_gate: &GateRe
 pub struct BitBlasting<'a> {
     mapping: HashMap<HashableNodeRef, Vec<GateRef>>, // maps a btor2 operator to its resulting bitvector of gates
     constant_propagation: bool, // TODO: make this flag work. Currently we always perform constant propagation
-    constraints: HashMap<HashableGateRef, bool>, // this is for remainder and division, these are constraint based.
+    pub constraints: HashMap<HashableGateRef, bool>, // this is for remainder and division, these are constraint based.
     word_size: u64, // I use this attribute as a variable because maybe we will do variable-length addresses? I only use this for reads and writes.
     model: &'a Model, // BTOR2 model
     addresses_gates: Vec<Vec<GateRef>>, // memory addresses represented as vectors of (constant-)gates

@@ -2,7 +2,6 @@ use crate::modeler::bitblasting::BitBlasting;
 use crate::modeler::bitblasting::HashableGateRef;
 use crate::modeler::bitblasting::{Gate, GateRef};
 use std::cell::RefCell;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -70,13 +69,10 @@ impl Qubo {
             return;
         }
         let key = HashableQubitRef::from(qubit.clone());
-        if self.linear_coefficients.contains_key(&key) {
-            let new_coeff = self.linear_coefficients.get(&key).unwrap() + value;
-            self.linear_coefficients.insert(key, new_coeff);
-        } else {
-            self.linear_coefficients.insert(key, value);
-        }
+        let entry = self.linear_coefficients.entry(key).or_insert(0.0);
+        *entry += value;
     }
+
     fn add_new_row(&mut self, qubit: &QubitRef) {
         let key = HashableQubitRef::from(qubit.clone());
         self.quadratic_coefficients
@@ -84,25 +80,9 @@ impl Qubo {
             .or_insert_with(HashMap::new);
     }
 
-    pub fn add_quadratic_coeffs(&mut self, qubit1: &QubitRef, qubit2: &QubitRef, value: f32) {
-        if value == 0.0 {
-            return;
-        }
-        let key1;
-        let key2;
-        match qubit1.as_ptr().cmp(&qubit2.as_ptr()) {
-            Ordering::Greater => {
-                key1 = HashableQubitRef::from(qubit2.clone());
-                key2 = HashableQubitRef::from(qubit1.clone());
-                self.add_new_row(&qubit2);
-            }
-            Ordering::Less => {
-                key1 = HashableQubitRef::from(qubit1.clone());
-                key2 = HashableQubitRef::from(qubit2.clone());
-                self.add_new_row(&qubit1);
-            }
-            Ordering::Equal => return self.add_linear_coeff(qubit1, value),
-        }
+    fn insert_quadratic_coeff(&mut self, qubit1: &QubitRef, qubit2: &QubitRef, value: f32) {
+        let key1 = HashableQubitRef::from(qubit1.clone());
+        let key2 = HashableQubitRef::from(qubit2.clone());
 
         let hashmap: &mut HashMap<HashableQubitRef, f32> =
             self.quadratic_coefficients.get_mut(&key1).unwrap();
@@ -115,9 +95,58 @@ impl Qubo {
         }
     }
 
+    pub fn add_quadratic_coeffs(&mut self, qubit1: &QubitRef, qubit2: &QubitRef, value: f32) {
+        if value == 0.0 {
+            return;
+        } else if qubit1.as_ptr() == qubit2.as_ptr() {
+            return self.add_linear_coeff(qubit1, value);
+        }
+
+        self.add_new_row(&qubit2);
+        self.add_new_row(&qubit1);
+
+        // trading space for time
+        self.insert_quadratic_coeff(qubit1, qubit2, value);
+        self.insert_quadratic_coeff(qubit2, qubit1, value);
+    }
+
     pub fn add_offset(&mut self, value: f32) -> f32 {
         self.offset += value;
         self.offset
+    }
+
+    pub fn fix_variable(&mut self, qubit: &QubitRef, value: bool) {
+        let num: f32 = (value as i32) as f32;
+
+        let key = HashableQubitRef::from(qubit.clone());
+
+        assert!(
+            self.linear_coefficients.contains_key(&key)
+                || self.quadratic_coefficients.contains_key(&key)
+        );
+
+        if self.linear_coefficients.contains_key(&key) {
+            let coeff = self.linear_coefficients.get(&key).unwrap();
+            self.offset += coeff * num;
+            self.linear_coefficients.remove(&key);
+        }
+
+        if self.quadratic_coefficients.contains_key(&key) {
+            let hashmap = <&HashMap<HashableQubitRef, f32>>::clone(
+                &&self.quadratic_coefficients.get(&key).unwrap(),
+            );
+            let pairs: Vec<(QubitRef, f32)> =
+                hashmap.iter().map(|(x, y)| (x.value.clone(), *y)).collect();
+            for (qubit_ref, value) in pairs {
+                self.add_linear_coeff(&qubit_ref, value * num);
+                let key2 = HashableQubitRef::from(qubit_ref);
+                self.quadratic_coefficients
+                    .get_mut(&key2)
+                    .unwrap()
+                    .remove(&key);
+            }
+            self.quadratic_coefficients.remove(&key);
+        }
     }
 }
 
@@ -168,6 +197,11 @@ impl<'a> Qubot<'a> {
             replacement
         }
     }
+    fn record_mapping(&mut self, gate: &GateRef, replacement: QubitRef) -> QubitRef {
+        let key = HashableGateRef::from(gate.clone());
+        assert!(!self.mapping.contains_key(&key));
+        self.mapping.insert(key, replacement).unwrap()
+    }
 
     fn process_gate(&mut self, gate: &GateRef) -> QubitRef {
         if let Some(replacement) = self.query_existence(gate) {
@@ -180,13 +214,13 @@ impl<'a> Qubot<'a> {
             Gate::InputBit {} => QubitRef::from(RefCell::new(Qubit {})),
             Gate::Not { value } => {
                 let operand = self.visit(value);
-                let result_qubit = QubitRef::from(Qubit {});
+                let z = QubitRef::from(Qubit {});
                 self.qubo.add_linear_coeff(&operand, -2.0);
-                self.qubo.add_linear_coeff(&result_qubit, -2.0);
+                self.qubo.add_linear_coeff(&z, -2.0);
 
-                self.qubo.add_quadratic_coeffs(&operand, &result_qubit, 4.0);
+                self.qubo.add_quadratic_coeffs(&operand, &z, 4.0);
                 self.qubo.add_offset(2.0);
-                result_qubit
+                self.record_mapping(&gate, z)
             }
             Gate::And { left, right } => {
                 let x1 = self.visit(left);
@@ -202,7 +236,7 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4.0);
 
                 self.qubo.add_offset(0.0);
-                z
+                self.record_mapping(&gate, z)
             }
             Gate::Nand { left, right } => {
                 let x1 = self.visit(left);
@@ -218,7 +252,7 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, 4.0);
 
                 self.qubo.add_offset(6.0);
-                z
+                self.record_mapping(&gate, z)
             }
             Gate::Matriarch1 { cond, right } => {
                 let x1 = self.visit(cond);
@@ -234,7 +268,7 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4.0);
 
                 self.qubo.add_offset(0.0);
-                z
+                self.record_mapping(&gate, z)
             }
             Gate::Or { left, right } => {
                 let x1 = self.visit(left);
@@ -250,7 +284,7 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4.0);
 
                 self.qubo.add_offset(0.0);
-                z
+                self.record_mapping(&gate, z)
             }
             Gate::ResultHalfAdder { input1, input2 } => {
                 let x1 = self.visit(input1);
@@ -280,7 +314,7 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4.0);
 
                 self.qubo.add_offset(0.0);
-                z
+                self.record_mapping(&gate, z)
             }
             Gate::ResultFullAdder {
                 input1,
@@ -316,7 +350,7 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&z, &x3, -4.0);
 
                 self.qubo.add_offset(0.0);
-                z
+                self.record_mapping(&gate, z)
             }
             Gate::CarryHalfAdder { .. } => {
                 let key = HashableGateRef::from(gate.clone());
@@ -324,7 +358,8 @@ impl<'a> Qubot<'a> {
                 self.visit(gate_half_adder);
 
                 let half_adder_key = HashableGateRef::from(gate_half_adder.clone());
-                (*self.mapping_carries.get(&half_adder_key).unwrap()).clone()
+                let z = (*self.mapping_carries.get(&half_adder_key).unwrap()).clone();
+                self.record_mapping(&gate, z)
             }
             Gate::CarryFullAdder { .. } => {
                 let key = HashableGateRef::from(gate.clone());
@@ -332,7 +367,8 @@ impl<'a> Qubot<'a> {
                 self.visit(gate_full_adder);
 
                 let full_adder_key = HashableGateRef::from(gate_full_adder.clone());
-                (*self.mapping_carries.get(&full_adder_key).unwrap()).clone()
+                let z = (*self.mapping_carries.get(&full_adder_key).unwrap()).clone();
+                self.record_mapping(&gate, z)
             }
         }
     }
@@ -360,9 +396,16 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(qubit, &z, -4.0);
                 ored_bad_states = z;
             }
+        } else {
+            panic!("No bad states qubits!");
         }
 
         // apply constraints
+
+        for (gate, value) in self.bitblasting.constraints.iter() {
+            let qubit = self.mapping.get(gate).unwrap();
+            self.qubo.fix_variable(qubit, *value);
+        }
 
         bad_state_qubits
     }
