@@ -9,9 +9,10 @@ use log::info;
 use modeler::bitblasting::BitBlasting;
 use modeler::builder::generate_model;
 use modeler::memory::replace_memory;
-use modeler::optimize::fold_constants;
 use modeler::qubot::call_qubot;
-use modeler::unroller::{renumber_model, unroll_model};
+use modeler::optimize::optimize_model;
+use modeler::solver::*;
+use modeler::unroller::{prune_model, renumber_model, unroll_model};
 use modeler::write_model;
 use monster::{
     disassemble::disassemble,
@@ -54,12 +55,12 @@ fn main() -> Result<()> {
 
     // process subcommands
     match matches.subcommand() {
-        ("disassemble", Some(args)) => {
+        Some(("disassemble", args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
 
             disassemble(input)
         }
-        ("cfg", Some(args)) => {
+        Some(("cfg", args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
             let output = expect_arg::<PathBuf>(args, "output-file")?;
             let distances = args.is_present("distances");
@@ -76,7 +77,7 @@ fn main() -> Result<()> {
                 write_to_file(output, &cfg)
             }
         }
-        ("smt", Some(args)) => {
+        Some(("smt", args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
             let output = expect_optional_arg::<PathBuf>(args, "output-file")?;
             let strategy = expect_arg::<ExplorationStrategyType>(args, "strategy")?;
@@ -117,7 +118,7 @@ fn main() -> Result<()> {
                 }
             })
         }
-        ("execute", Some(args)) => {
+        Some(("execute", args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
             let solver = expect_arg::<SolverType>(args, "solver")?;
             let strategy = expect_arg::<ExplorationStrategyType>(args, "strategy")?;
@@ -182,10 +183,11 @@ fn main() -> Result<()> {
                 }
             })
         }
-        ("model", Some(args)) => {
+        Some(("model", args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
             let output = expect_optional_arg::<PathBuf>(args, "output-file")?;
             let unroll = expect_optional_arg(args, "unroll-model")?;
+            let solver = expect_arg::<monster::SmtType>(args, "solver")?;
             let prune = args.is_present("prune-model");
 
             let program = load_object_file(&input)?;
@@ -197,9 +199,23 @@ fn main() -> Result<()> {
                 replace_memory(&mut model);
                 for n in 0..unroll_depth {
                     unroll_model(&mut model, n);
-                    fold_constants(&mut model);
+                    optimize_model::<none_impl::NoneSolver>(&mut model)
                 }
-                renumber_model(&mut model, prune);
+                if prune {
+                    prune_model(&mut model);
+                }
+                match solver {
+                    monster::SmtType::Generic => (), // nothing left to do
+                    #[cfg(feature = "boolector")]
+                    monster::SmtType::Boolector => {
+                        optimize_model::<boolector_impl::BoolectorSolver>(&mut model)
+                    }
+                    #[cfg(feature = "z3")]
+                    monster::SmtType::Z3 => {
+                        panic!("solver Z3 not supported yet")
+                    }
+                }
+                renumber_model(&mut model);
             }
 
             if let Some(output_path) = output {
@@ -221,7 +237,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        ("rarity", Some(args)) => {
+        Some(("rarity", args)) => {
             let input = expect_arg::<PathBuf>(args, "input-file")?;
 
             let options = RaritySimulationOptions {

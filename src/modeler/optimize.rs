@@ -1,3 +1,4 @@
+use crate::modeler::solver::{Solution, Solver};
 use crate::modeler::{HashableNodeRef, Model, Node, NodeRef, NodeType};
 use log::{debug, trace, warn};
 use std::cell::RefCell;
@@ -9,27 +10,29 @@ use std::rc::Rc;
 // Public Interface
 //
 
-pub fn fold_constants(model: &mut Model) {
-    let mut constant_folder = ConstantFolder::new();
+pub fn optimize_model<S: Solver>(model: &mut Model) {
+    debug!("Optimizing model using '{}' SMT solver ...", S::name());
+    let mut constant_folder = ConstantFolder::<S>::new();
     model
         .sequentials
-        .retain(|s| !constant_folder.check_for_constant_sequential(s));
+        .retain(|s| constant_folder.should_retain_sequential(s));
     for sequential in &model.sequentials {
         constant_folder.visit(sequential);
     }
     model
         .bad_states_initial
-        .retain(|s| !constant_folder.check_for_constant_bad_state(s));
+        .retain(|s| constant_folder.should_retain_bad_state(s, true));
     model
         .bad_states_sequential
-        .retain(|s| !constant_folder.check_for_constant_bad_state(s));
+        .retain(|s| constant_folder.should_retain_bad_state(s, false));
 }
 
 //
 // Private Implementation
 //
 
-struct ConstantFolder {
+struct ConstantFolder<S> {
+    smt_solver: S,
     marks: HashSet<HashableNodeRef>,
     mapping: HashMap<HashableNodeRef, NodeRef>,
     const_false: NodeRef,
@@ -60,9 +63,10 @@ fn new_const(imm: u64) -> NodeRef {
     new_const_with_type(imm, NodeType::Word)
 }
 
-impl ConstantFolder {
+impl<S: Solver> ConstantFolder<S> {
     fn new() -> Self {
         Self {
+            smt_solver: S::new(),
             marks: HashSet::new(),
             mapping: HashMap::new(),
             const_false: new_const_with_type(0, NodeType::Bit),
@@ -126,6 +130,34 @@ impl ConstantFolder {
         None
     }
 
+    fn solve_boolean_binary(
+        &mut self,
+        node: &NodeRef,
+        left: &NodeRef,
+        right: &NodeRef,
+        f_name: &str,
+    ) -> Option<NodeRef> {
+        if self.smt_solver.is_always_true(node) {
+            trace!(
+                "Solved {}({:?},{:?}) -> T",
+                f_name,
+                RefCell::as_ptr(left),
+                RefCell::as_ptr(right)
+            );
+            return Some(self.const_true.clone());
+        }
+        if self.smt_solver.is_always_false(node) {
+            trace!(
+                "Solved {}({:?},{:?}) -> F",
+                f_name,
+                RefCell::as_ptr(left),
+                RefCell::as_ptr(right)
+            );
+            return Some(self.const_false.clone());
+        }
+        None
+    }
+
     // SMT-LIB does not specify the result of remainder by zero, for BTOR we
     // take the largest unsigned integer that can be represented.
     fn btor_u64_rem(left: u64, right: u64) -> u64 {
@@ -179,6 +211,10 @@ impl ConstantFolder {
         None
     }
 
+    fn solve_ult(&mut self, node: &NodeRef, left: &NodeRef, right: &NodeRef) -> Option<NodeRef> {
+        self.solve_boolean_binary(node, left, right, "ULT")
+    }
+
     fn fold_eq(&self, left: &NodeRef, right: &NodeRef) -> Option<NodeRef> {
         if RefCell::as_ptr(left) == RefCell::as_ptr(right) {
             trace!(
@@ -210,6 +246,10 @@ impl ConstantFolder {
         None
     }
 
+    fn solve_eq(&mut self, node: &NodeRef, left: &NodeRef, right: &NodeRef) -> Option<NodeRef> {
+        self.solve_boolean_binary(node, left, right, "EQ")
+    }
+
     fn fold_and(&self, left: &NodeRef, right: &NodeRef) -> Option<NodeRef> {
         if is_const_false(left) {
             trace!("Folding AND({:?}[F],_) -> F", RefCell::as_ptr(left));
@@ -227,7 +267,19 @@ impl ConstantFolder {
             );
             return Some(self.const_true.clone());
         }
+        if is_const_true(left) {
+            trace!("Strength-reducing AND(T,x) -> x");
+            return Some(right.clone());
+        }
+        if is_const_true(right) {
+            trace!("Strength-reducing AND(x,T) -> x");
+            return Some(left.clone());
+        }
         None
+    }
+
+    fn solve_and(&mut self, node: &NodeRef, left: &NodeRef, right: &NodeRef) -> Option<NodeRef> {
+        self.solve_boolean_binary(node, left, right, "AND")
     }
 
     fn fold_not(&self, value: &NodeRef) -> Option<NodeRef> {
@@ -245,6 +297,41 @@ impl ConstantFolder {
     fn fold_ext(&self, value: &NodeRef) -> Option<NodeRef> {
         if let Some(value_imm) = get_constant(value) {
             return Some(new_const(value_imm));
+        }
+        None
+    }
+
+    fn solve_ite_bit(
+        &mut self,
+        node: &NodeRef,
+        cond: &NodeRef,
+        left: &NodeRef,
+        right: &NodeRef,
+    ) -> Option<NodeRef> {
+        if let Some(x) = self.solve_boolean_binary(node, left, right, "ITE") {
+            return Some(x);
+        }
+        if self.smt_solver.is_always_equal(node, cond) {
+            trace!("Strength-reducing ITE(x,_,_) -> x");
+            return Some(cond.clone());
+        }
+        None
+    }
+
+    fn solve_ite_word(
+        &mut self,
+        node: &NodeRef,
+        _cond: &NodeRef,
+        left: &NodeRef,
+        right: &NodeRef,
+    ) -> Option<NodeRef> {
+        if self.smt_solver.is_always_equal(node, left) {
+            trace!("Strength-reducing ITE(_,x,_) -> x");
+            return Some(left.clone());
+        }
+        if self.smt_solver.is_always_equal(node, right) {
+            trace!("Strength-reducing ITE(_,_,x) -> x");
+            return Some(right.clone());
         }
         None
     }
@@ -285,7 +372,7 @@ impl ConstantFolder {
     }
 
     #[rustfmt::skip]
-    fn process(&mut self, node: &NodeRef) -> Option<NodeRef> {
+    fn process_fold(&mut self, node: &NodeRef) -> Option<NodeRef> {
         match *node.borrow_mut() {
             // TODO: Remove and use global `false` constant.
             Node::Const { sort: NodeType::Bit, imm: 0, .. } => {
@@ -391,7 +478,35 @@ impl ConstantFolder {
         }
     }
 
-    fn check_for_constant_bad_state(&mut self, bad_state: &NodeRef) -> bool {
+    #[rustfmt::skip]
+    fn process_solve(&mut self, node: &NodeRef) -> Option<NodeRef> {
+        match &*node.borrow() {
+            Node::Ult { left, right, .. } => {
+                self.solve_ult(node, left, right)
+            }
+            Node::Eq { left, right, .. } => {
+                self.solve_eq(node, left, right)
+            }
+            Node::And { left, right, .. } => {
+                self.solve_and(node, left, right)
+            }
+            Node::Ite { sort: NodeType::Bit, cond, left, right, .. } => {
+                self.solve_ite_bit(node, cond, left, right)
+            }
+            Node::Ite { sort: NodeType::Word, cond, left, right, .. } => {
+                self.solve_ite_word(node, cond, left, right)
+            }
+            _ => None
+        }
+    }
+
+    fn process(&mut self, node: &NodeRef) -> Option<NodeRef> {
+        // First try to constant-fold nodes and only invoke the SMT solver on
+        // some specific boolean operations in case constant-folding fails.
+        self.process_fold(node).or_else(|| self.process_solve(node))
+    }
+
+    fn should_retain_bad_state(&mut self, bad_state: &NodeRef, use_smt: bool) -> bool {
         self.visit(bad_state);
         if let Node::Bad { cond, name, .. } = &*bad_state.borrow() {
             if is_const_false(cond) {
@@ -399,21 +514,41 @@ impl ConstantFolder {
                     "Bad state '{}' became unreachable, removing",
                     name.as_deref().unwrap_or("?")
                 );
-                return true;
+                return false;
             }
             if is_const_true(cond) {
                 warn!(
                     "Bad state '{}' became statically reachable!",
                     name.as_deref().unwrap_or("?")
                 );
+                return true;
             }
+            if use_smt {
+                match self.smt_solver.solve(cond) {
+                    Solution::Sat => {
+                        warn!(
+                            "Bad state '{}' is satisfiable!",
+                            name.as_deref().unwrap_or("?")
+                        );
+                        return true;
+                    }
+                    Solution::Unsat => {
+                        debug!(
+                            "Bad state '{}' is unsatisfiable, removing",
+                            name.as_deref().unwrap_or("?")
+                        );
+                        return false;
+                    }
+                    Solution::Timeout => (),
+                }
+            }
+            true
         } else {
             panic!("expecting 'Bad' node here");
         }
-        false
     }
 
-    fn check_for_constant_sequential(&mut self, sequential: &NodeRef) -> bool {
+    fn should_retain_sequential(&mut self, sequential: &NodeRef) -> bool {
         if let Node::Next { state, next, .. } = &*sequential.borrow() {
             if let Node::State { init, name, .. } = &*state.borrow() {
                 if let Some(init) = init {
@@ -424,7 +559,7 @@ impl ConstantFolder {
                             get_constant(init).map_or("X".to_string(), |i| i.to_string()),
                         );
                         self.pre_record_mapping(state, init);
-                        return true;
+                        return false;
                     }
                     if let Some(init_imm) = get_constant(init) {
                         if let Some(next_imm) = get_constant(next) {
@@ -436,17 +571,17 @@ impl ConstantFolder {
                                     next_imm
                                 );
                                 self.pre_record_mapping(state, init);
-                                return true;
+                                return false;
                             }
                         }
                     }
                 }
+                true
             } else {
                 panic!("expecting 'State' node here");
             }
         } else {
             panic!("expecting 'Next' node here");
         }
-        false
     }
 }

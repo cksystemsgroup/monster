@@ -1,4 +1,4 @@
-use crate::modeler::{get_bitsize, HashableNodeRef, Model, Node, NodeRef, NodeType};
+use crate::modeler::{HashableNodeRef, Model, Node, NodeRef, NodeType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -223,7 +223,7 @@ fn get_non_constant_gate(gates: &[GateRef]) -> Option<GateRef> {
 }
 
 fn get_replacement_from_constant(sort: &NodeType, value_: u64) -> Vec<GateRef> {
-    let total_bits = get_bitsize(sort);
+    let total_bits = sort.bitsize();
     let mut replacement: Vec<GateRef> = Vec::new();
     let mut value = value_;
     for _ in 0..total_bits {
@@ -234,7 +234,7 @@ fn get_replacement_from_constant(sort: &NodeType, value_: u64) -> Vec<GateRef> {
 }
 
 fn get_replacement_from_unique_gate(sort: &NodeType, gate_type: Gate) -> Vec<GateRef> {
-    let total_bits = get_bitsize(sort);
+    let total_bits = sort.bitsize();
     let mut replacement: Vec<GateRef> = Vec::new();
     let gate = GateRef::from(gate_type);
     for _ in 0..total_bits {
@@ -586,7 +586,7 @@ impl<'a> BitBlasting<'a> {
             replacement.push(GateRef::from(Gate::ConstFalse));
         }
         for (i, digit) in right.iter().enumerate() {
-            let mut temp_result = mutiply_by_digit(&left, digit, i);
+            let mut temp_result = mutiply_by_digit(left, digit, i);
 
             add_front_zeros_padding(&mut temp_result, expected_max_size);
             replacement = self.bitwise_add(&replacement, &temp_result, false);
@@ -601,9 +601,9 @@ impl<'a> BitBlasting<'a> {
         divisor: &[GateRef],
     ) -> (Vec<GateRef>, Vec<GateRef>) {
         // check if division can be done at word level
-        if get_non_constant_gate(&dividend).is_none() && get_non_constant_gate(&divisor).is_none() {
-            let const_dividend = get_numeric_from_gates(&dividend);
-            let const_divisor = get_numeric_from_gates(&divisor);
+        if get_non_constant_gate(dividend).is_none() && get_non_constant_gate(divisor).is_none() {
+            let const_dividend = get_numeric_from_gates(dividend);
+            let const_divisor = get_numeric_from_gates(divisor);
 
             let quotient = get_gates_from_numeric(const_dividend / const_divisor, &dividend.len());
             let remainder = get_gates_from_numeric(const_dividend % const_divisor, &dividend.len());
@@ -617,7 +617,7 @@ impl<'a> BitBlasting<'a> {
                 remainder.push(GateRef::from(Gate::InputBit));
             }
 
-            let temp_mul = self.bitwise_multiplication(&quotient, &divisor);
+            let temp_mul = self.bitwise_multiplication(&quotient, divisor);
             let temp_sum = self.bitwise_add(&temp_mul, &remainder, true);
 
             assert!(dividend.len() == temp_sum.len());
@@ -829,7 +829,7 @@ impl<'a> BitBlasting<'a> {
                 value,
             } => {
                 let mut replacement: Vec<GateRef> = self.visit(value);
-                while replacement.len() < get_bitsize(from) {
+                while replacement.len() < from.bitsize() {
                     replacement.push(GateRef::from(Gate::ConstFalse));
                 }
                 self.record_mapping(node, replacement)
