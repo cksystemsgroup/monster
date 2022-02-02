@@ -4,6 +4,7 @@ use crate::modeler::bitblasting::{Gate, GateRef};
 use crate::modeler::NodeRef;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
@@ -65,6 +66,21 @@ impl Qubo {
             quadratic_coefficients: HashMap::new(),
             offset: 0,
         }
+    }
+
+    pub fn _get_count_variables(&mut self) -> usize {
+        let set1: HashSet<usize> = self
+            .linear_coefficients
+            .keys()
+            .map(|x| (*x).value.as_ptr() as usize)
+            .collect();
+        let set2: HashSet<usize> = self
+            .quadratic_coefficients
+            .keys()
+            .map(|x| (*x).value.as_ptr() as usize)
+            .collect();
+
+        set1.union(&set2).count()
     }
     pub fn add_linear_coeff(&mut self, qubit: &QubitRef, value: i32) {
         if value == 0 {
