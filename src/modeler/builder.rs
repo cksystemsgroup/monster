@@ -30,7 +30,7 @@ const INSTRUCTION_SIZE: u64 = riscu::INSTRUCTION_SIZE as u64;
 const NUMBER_OF_REGISTERS: usize = 32;
 const MEMORY_SIZE: u64 = bytesize::MIB; // TODO: Make this configurable.
 const MAX_HEAP_SIZE: u64 = 8 * size_of::<u64>() as u64; // TODO: Make this configurable.
-const MAX_STACK_SIZE: u64 = 16 * size_of::<u64>() as u64; // TODO: Make this configurable.
+const MAX_STACK_SIZE: u64 = 9 * size_of::<u64>() as u64; // TODO: Make this configurable.
 
 // TODO: Add implementation of all syscalls.
 // TODO: Add initialization of stack segment.

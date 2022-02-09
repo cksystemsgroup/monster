@@ -1,6 +1,7 @@
 use crate::modeler::bitblasting::BitBlasting;
 use crate::modeler::bitblasting::HashableGateRef;
 use crate::modeler::bitblasting::{Gate, GateRef};
+use crate::modeler::get_nid;
 use crate::modeler::NodeRef;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -11,16 +12,101 @@ use std::rc::Rc;
 pub type QubitRef = Rc<RefCell<Qubit>>;
 
 // public interface
-
-pub fn call_qubot<'a>(model: &'a BitBlasting<'a>, bad_states: &[GateRef]) -> Vec<QubitRef> {
+pub fn call_qubot<'a>(model: &'a BitBlasting<'a>, bad_states: &[GateRef]) {
+    //println!("aaa {}", bad_states.len());
     // returns qubits of bad states
     let mut qubo = Qubot::new(model);
-    qubo.evaluate_inputs(bad_states, &[1, 2, 3]);
-    qubo.build_qubo(bad_states)
+    let bad_state_qubits = qubo.build_qubo(bad_states);
+    // for q in bad_state_qubits.clone() {
+    //     let key = HashableQubitRef::from(q.0.clone());
+
+    //     if qubo.qubo.fixed_variables.contains_key(&key) {
+    //         println!("{} const bad q val-> {}",q.1, qubo.qubo.fixed_variables.get(&key).unwrap() );
+    //     }else {
+    //         println!("{} non-const bad q",q.1);
+    //     }
+    // }
+
+    let target_gates = qubo.bitblasting.nid_to_gates.get(&10000000).unwrap();
+    println!("{:?}", target_gates[0]);
+    for gate_ in target_gates {
+        let key = HashableGateRef::from(gate_.clone());
+        println!("{}", qubo.mapping.contains_key(&key));
+    }
+    println!("********************\n");
+
+    println!(
+        "{} variables, {}",
+        qubo.qubo.get_count_variables(),
+        qubo.qubo.offset
+    );
+
+    // let mut count_not_present = 0;
+    // let mut total_gates = 0;
+    // for (nid, gates) in model.nid_to_gates.iter() {
+    //     total_gates += gates.len();
+    //     for gate in gates {
+    //         let key = HashableGateRef::from(gate.clone());
+    //         if !qubo.mapping.contains_key(&key) {
+    //             println!("nid {}", nid);
+    //             count_not_present += 1;
+    //         }
+    //     }
+    // }
+    // println!("{} / {}", count_not_present, total_gates);
+    // evaluate inputs
+    println!("num inputs: {}", model.input_gates.len());
+    let input_gates_values: Vec<i64> = vec![0; qubo.bitblasting.input_gates.len()];
+
+    let mut input_evaluator = InputEvaluator::new();
+    let final_offset = input_evaluator.evaluate_inputs(
+        &qubo.qubo,
+        &qubo.mapping,
+        &qubo.bitblasting.input_gates,
+        &input_gates_values,
+        bad_state_qubits,
+    );
+
+    for (nid, gates) in model.nid_to_gates.iter() {
+        let mut temp = 0;
+        let mut is_valid = true;
+        for (i, gate) in gates.iter().enumerate() {
+            let gate_key = HashableGateRef::from(gate.clone());
+            if qubo.mapping.get(&gate_key).is_none() {
+                if *gate == GateRef::from(Gate::ConstFalse) {
+                    println!("{} -> unk (0)", nid);
+                } else if *gate == GateRef::from(Gate::ConstTrue) {
+                    println!("{} -> unk (1)", nid);
+                } else {
+                    println!("{} -> unk", nid);
+                }
+
+                is_valid = false;
+                break;
+            }
+            let qubit_ref = qubo.mapping.get(&gate_key).unwrap();
+
+            let qubit_key = HashableQubitRef::from(qubit_ref.clone());
+            if let Some(variable_value) = input_evaluator.fixed_qubits.get(&qubit_key) {
+                temp += (2_u64).pow(i as u32) * (*variable_value as u64);
+            } else {
+                let variable_value = *qubo.qubo.fixed_variables.get(&qubit_key).unwrap() as u64;
+                temp += (2_u64).pow(i as u32) * (variable_value);
+            }
+        }
+
+        if is_valid {
+            println!("{} -> {}", nid, temp);
+        }
+    }
+
+    println!("final offset: {}", final_offset);
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Qubit {}
+#[derive(Debug, PartialEq)]
+pub struct Qubit {
+    name: u64,
+}
 
 impl From<Qubit> for QubitRef {
     fn from(qubit: Qubit) -> Self {
@@ -53,10 +139,62 @@ impl Hash for HashableQubitRef {
     }
 }
 
+pub enum Rule {
+    Not {
+        x1: QubitRef,
+    },
+    And {
+        x1: QubitRef,
+        x2: QubitRef,
+    },
+    Nand {
+        x1: QubitRef,
+        x2: QubitRef,
+    },
+    Matriarch1 {
+        x1: QubitRef,
+        x2: QubitRef,
+    },
+    Or {
+        x1: QubitRef,
+        x2: QubitRef,
+    },
+    AuxHalfAdder {
+        x1: QubitRef,
+        x2: QubitRef,
+    },
+    AuxFullAdder {
+        x1: QubitRef,
+        x2: QubitRef,
+        x3: QubitRef,
+    },
+    CarryHalfAdder {
+        x1: QubitRef,
+        x2: QubitRef,
+    },
+    CarryFullAdder {
+        x1: QubitRef,
+        x2: QubitRef,
+        x3: QubitRef,
+    },
+    ResultHalfAdder {
+        x1: QubitRef,
+        x2: QubitRef,
+    },
+    ResultFullAdder {
+        x1: QubitRef,
+        x2: QubitRef,
+        x3: QubitRef,
+    },
+    Invalid,
+}
+
 pub struct Qubo {
     linear_coefficients: HashMap<HashableQubitRef, i32>,
     quadratic_coefficients: HashMap<HashableQubitRef, HashMap<HashableQubitRef, i32>>,
     offset: i32,
+    rules: HashMap<HashableQubitRef, Rule>, // used when we want to evaluate an input
+    fixed_variables: HashMap<HashableQubitRef, bool>, // used for when we want to evaluate an input
 }
 
 impl Qubo {
@@ -65,10 +203,12 @@ impl Qubo {
             linear_coefficients: HashMap::new(),
             quadratic_coefficients: HashMap::new(),
             offset: 0,
+            rules: HashMap::new(),
+            fixed_variables: HashMap::new(),
         }
     }
 
-    pub fn _get_count_variables(&mut self) -> usize {
+    pub fn get_count_variables(&mut self) -> usize {
         let set1: HashSet<usize> = self
             .linear_coefficients
             .keys()
@@ -82,6 +222,12 @@ impl Qubo {
 
         set1.union(&set2).count()
     }
+
+    pub fn add_rule(&mut self, qubit: &QubitRef, value: Rule) {
+        let key = HashableQubitRef::from(qubit.clone());
+        assert!(self.rules.insert(key, value).is_none())
+    }
+
     pub fn add_linear_coeff(&mut self, qubit: &QubitRef, value: i32) {
         if value == 0 {
             return;
@@ -137,6 +283,8 @@ impl Qubo {
         let num: i32 = (value as i32) as i32;
 
         let key = HashableQubitRef::from(qubit.clone());
+        self.fixed_variables.insert(key, value);
+        let key = HashableQubitRef::from(qubit.clone());
 
         assert!(
             self.linear_coefficients.contains_key(&key)
@@ -170,11 +318,12 @@ impl Qubo {
 
 pub struct Qubot<'a> {
     qubo: Qubo,
-    mapping: HashMap<HashableGateRef, QubitRef>,
+    pub mapping: HashMap<HashableGateRef, QubitRef>,
     mapping_carries: HashMap<HashableGateRef, QubitRef>, // ResultHalfAdder or ResultFullAdder -> to Qubit that represent carries
     const_true_qubit: QubitRef,
     const_false_qubit: QubitRef,
     bitblasting: &'a BitBlasting<'a>,
+    current_index: u64,
 }
 
 impl<'a> Qubot<'a> {
@@ -183,10 +332,16 @@ impl<'a> Qubot<'a> {
             qubo: Qubo::new(),
             mapping: HashMap::new(),
             mapping_carries: HashMap::new(),
-            const_true_qubit: QubitRef::new(RefCell::new(Qubit {})),
-            const_false_qubit: QubitRef::new(RefCell::new(Qubit {})),
+            const_false_qubit: QubitRef::new(RefCell::new(Qubit { name: 0 })),
+            const_true_qubit: QubitRef::new(RefCell::new(Qubit { name: 1 })),
             bitblasting: model,
+            current_index: 1,
         }
+    }
+
+    fn get_current_index(&mut self) -> u64 {
+        self.current_index += 1;
+        self.current_index
     }
 
     fn update_mapping_carries(&mut self, gate: &GateRef, qubit_carry: QubitRef) {
@@ -195,7 +350,7 @@ impl<'a> Qubot<'a> {
         self.mapping_carries.insert(key, qubit_carry);
     }
 
-    fn query_existence(&self, gate: &GateRef) -> Option<QubitRef> {
+    pub fn query_existence(&self, gate: &GateRef) -> Option<QubitRef> {
         let key = HashableGateRef::from(gate.clone());
         if self.mapping.contains_key(&key) {
             self.mapping.get(&key).cloned()
@@ -210,40 +365,61 @@ impl<'a> Qubot<'a> {
         if self.mapping.contains_key(&key) {
             self.mapping.get(&key).cloned().unwrap()
         } else {
-            let replacement = self.process_gate(gate);
             assert!(!self.mapping.contains_key(&key));
+            let replacement = self.process_gate(gate);
+            assert!(self.mapping.contains_key(&key));
+
             replacement
         }
     }
     fn record_mapping(&mut self, gate: &GateRef, replacement: QubitRef) -> QubitRef {
         let key = HashableGateRef::from(gate.clone());
         assert!(!self.mapping.contains_key(&key));
-        self.mapping.insert(key, replacement).unwrap()
+        self.mapping.insert(key, replacement.clone());
+        replacement
     }
 
-    fn process_gate(&mut self, gate: &GateRef) -> QubitRef {
+    pub fn process_gate(&mut self, gate: &GateRef) -> QubitRef {
+        let target_gates = self.bitblasting.nid_to_gates.get(&10003276).unwrap();
+        if HashableGateRef::from(gate.clone()) == HashableGateRef::from(target_gates[0].clone()) {
+            println!("index 0 visited");
+        }
+
         if let Some(replacement) = self.query_existence(gate) {
             return replacement;
         }
 
         match &*gate.borrow() {
-            Gate::ConstTrue {} => self.const_true_qubit.clone(),
-            Gate::ConstFalse {} => self.const_false_qubit.clone(),
-            Gate::InputBit {} => QubitRef::from(RefCell::new(Qubit {})),
+            Gate::ConstTrue {} => self.record_mapping(gate, self.const_true_qubit.clone()),
+            Gate::ConstFalse {} => self.record_mapping(gate, self.const_false_qubit.clone()),
+            Gate::InputBit {} => {
+                let new_qubit = QubitRef::from(RefCell::new(Qubit {
+                    name: self.get_current_index(),
+                }));
+                self.qubo.add_rule(&new_qubit, Rule::Invalid);
+                self.record_mapping(gate, new_qubit)
+            }
             Gate::Not { value } => {
                 let operand = self.visit(value);
-                let z = QubitRef::from(Qubit {});
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
+
                 self.qubo.add_linear_coeff(&operand, -2);
                 self.qubo.add_linear_coeff(&z, -2);
 
                 self.qubo.add_quadratic_coeffs(&operand, &z, 4);
                 self.qubo.add_offset(2);
+
+                self.qubo.add_rule(&z, Rule::Not { x1: operand });
                 self.record_mapping(gate, z)
             }
             Gate::And { left, right } => {
                 let x1 = self.visit(left);
                 let x2 = self.visit(right);
-                let z = QubitRef::from(Qubit {});
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
 
                 self.qubo.add_linear_coeff(&x1, 0);
                 self.qubo.add_linear_coeff(&x2, 0);
@@ -254,12 +430,16 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4);
 
                 self.qubo.add_offset(0);
+
+                self.qubo.add_rule(&z, Rule::And { x1, x2 });
                 self.record_mapping(gate, z)
             }
             Gate::Nand { left, right } => {
                 let x1 = self.visit(left);
                 let x2 = self.visit(right);
-                let z = QubitRef::from(Qubit {});
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
 
                 self.qubo.add_linear_coeff(&x1, -4);
                 self.qubo.add_linear_coeff(&x2, -4);
@@ -270,12 +450,16 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, 4);
 
                 self.qubo.add_offset(6);
+
+                self.qubo.add_rule(&z, Rule::Nand { x1, x2 });
                 self.record_mapping(gate, z)
             }
             Gate::Matriarch1 { cond, right } => {
                 let x1 = self.visit(cond);
                 let x2 = self.visit(right);
-                let z = QubitRef::from(Qubit {});
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
 
                 self.qubo.add_linear_coeff(&x1, 0);
                 self.qubo.add_linear_coeff(&x2, 2);
@@ -286,12 +470,16 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4);
 
                 self.qubo.add_offset(0);
+
+                self.qubo.add_rule(&z, Rule::Matriarch1 { x1, x2 });
                 self.record_mapping(gate, z)
             }
             Gate::Or { left, right } => {
                 let x1 = self.visit(left);
                 let x2 = self.visit(right);
-                let z = QubitRef::from(Qubit {});
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
 
                 self.qubo.add_linear_coeff(&x1, 2);
                 self.qubo.add_linear_coeff(&x2, 2);
@@ -302,15 +490,23 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4);
 
                 self.qubo.add_offset(0);
+
+                self.qubo.add_rule(&z, Rule::Or { x1, x2 });
                 self.record_mapping(gate, z)
             }
             Gate::ResultHalfAdder { input1, input2 } => {
                 let x1 = self.visit(input1);
                 let x2 = self.visit(input2);
 
-                let aux = QubitRef::from(Qubit {});
-                let carry = QubitRef::from(Qubit {});
-                let z = QubitRef::from(Qubit {});
+                let aux = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
+                let carry = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
 
                 self.update_mapping_carries(gate, carry.clone());
 
@@ -331,7 +527,21 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&x1, &z, 0);
                 self.qubo.add_quadratic_coeffs(&x2, &z, -4);
 
-                self.qubo.add_offset(0);
+                self.qubo.add_rule(
+                    &carry,
+                    Rule::CarryHalfAdder {
+                        x1: x1.clone(),
+                        x2: x2.clone(),
+                    },
+                );
+                self.qubo.add_rule(
+                    &aux,
+                    Rule::AuxHalfAdder {
+                        x1: x1.clone(),
+                        x2: x2.clone(),
+                    },
+                );
+                self.qubo.add_rule(&z, Rule::ResultHalfAdder { x1, x2 });
                 self.record_mapping(gate, z)
             }
             Gate::ResultFullAdder {
@@ -343,9 +553,15 @@ impl<'a> Qubot<'a> {
                 let x2 = self.visit(input2);
                 let x3 = self.visit(input3);
 
-                let aux = QubitRef::from(Qubit {});
-                let carry = QubitRef::from(Qubit {});
-                let z = QubitRef::from(Qubit {});
+                let aux = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
+                let carry = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
 
                 self.update_mapping_carries(gate, carry.clone());
 
@@ -367,6 +583,23 @@ impl<'a> Qubot<'a> {
                 self.qubo.add_quadratic_coeffs(&z, &carry, 4);
                 self.qubo.add_quadratic_coeffs(&z, &x3, -4);
 
+                self.qubo.add_rule(
+                    &carry,
+                    Rule::CarryFullAdder {
+                        x1: x1.clone(),
+                        x2: x2.clone(),
+                        x3: x3.clone(),
+                    },
+                );
+                self.qubo.add_rule(
+                    &aux,
+                    Rule::AuxFullAdder {
+                        x1: x1.clone(),
+                        x2: x2.clone(),
+                        x3: x3.clone(),
+                    },
+                );
+                self.qubo.add_rule(&z, Rule::ResultFullAdder { x1, x2, x3 });
                 self.qubo.add_offset(0);
                 self.record_mapping(gate, z)
             }
@@ -391,29 +624,43 @@ impl<'a> Qubot<'a> {
         }
     }
 
-    pub fn build_qubo(&mut self, bad_state_gates: &[GateRef]) -> Vec<QubitRef> {
-        let mut bad_state_qubits: Vec<QubitRef> = Vec::new();
-
+    pub fn build_qubo(&mut self, bad_state_gates: &[GateRef]) -> Vec<(QubitRef, u64)> {
+        let mut bad_state_qubits: Vec<(QubitRef, u64)> = Vec::new();
         for gate in bad_state_gates {
-            bad_state_qubits.push(self.process_gate(gate));
+            let gate_key = HashableGateRef::from(gate.clone());
+            let node = self.bitblasting.gates_to_bad_nids.get(&gate_key).unwrap();
+            bad_state_qubits.push((self.process_gate(gate), get_nid(node)));
         }
 
         // or bad states
         if !bad_state_qubits.is_empty() {
-            let mut ored_bad_states = bad_state_qubits[0].clone();
+            let mut ored_bad_states = bad_state_qubits[0].0.clone();
 
-            for qubit in bad_state_qubits.iter().skip(1) {
+            for (qubit, _) in bad_state_qubits.iter().skip(1) {
                 // or bad state
-                let z = QubitRef::from(Qubit {});
+                let z = QubitRef::from(Qubit {
+                    name: self.get_current_index(),
+                });
                 self.qubo.add_linear_coeff(&ored_bad_states, 2);
                 self.qubo.add_linear_coeff(qubit, 2);
                 self.qubo.add_linear_coeff(&z, 2);
+
+                self.qubo.add_rule(
+                    &z,
+                    Rule::Or {
+                        x1: ored_bad_states.clone(),
+                        x2: qubit.clone(),
+                    },
+                );
 
                 self.qubo.add_quadratic_coeffs(&ored_bad_states, qubit, 2);
                 self.qubo.add_quadratic_coeffs(&ored_bad_states, &z, -4);
                 self.qubo.add_quadratic_coeffs(qubit, &z, -4);
                 ored_bad_states = z;
             }
+
+            // fix ored bad states to be true
+            self.qubo.fix_variable(&ored_bad_states, true);
         } else {
             panic!("No bad states qubits!");
         }
@@ -427,246 +674,178 @@ impl<'a> Qubot<'a> {
         // fix true constants
         self.qubo.fix_variable(&self.const_true_qubit, true);
 
-        // fix false constants
+        //fix false constants
         self.qubo.fix_variable(&self.const_false_qubit, false);
 
         bad_state_qubits
     }
+}
 
-    fn evaluate_gate(
-        &self,
-        gate: &GateRef,
-        fixed_values: &mut HashMap<HashableGateRef, bool>,
-        offset: &mut i32,
-    ) -> bool {
-        let key = HashableGateRef::from(gate.clone());
+pub struct InputEvaluator {
+    pub fixed_qubits: HashMap<HashableQubitRef, bool>,
+}
 
-        if let Some(result) = fixed_values.get(&key) {
-            return *result;
-        }
-
-        match &*gate.borrow() {
-            Gate::ConstTrue {} => true,
-            Gate::ConstFalse {} => false,
-            Gate::InputBit {} => {
-                panic!("this case should not happend");
-            }
-            Gate::Not { value } => {
-                let value = self.evaluate_gate(value, fixed_values, offset);
-                let result = !value;
-
-                *offset += (value as i32) * -2;
-                *offset += (result as i32) * -2;
-                *offset += (result as i32) * (value as i32) * 4;
-
-                fixed_values.insert(key, result);
-                result
-            }
-            Gate::And { left, right } => {
-                let x1 = self.evaluate_gate(left, fixed_values, offset);
-                let x2 = self.evaluate_gate(right, fixed_values, offset);
-                let z = x1 && x2;
-
-                *offset += (z as i32) * 6;
-
-                *offset += (x1 as i32) * (x2 as i32) * 2;
-                *offset += (x1 as i32) * (z as i32) * -4;
-                *offset += (x2 as i32) * (z as i32) * -4;
-
-                fixed_values.insert(key, z);
-                z
-            }
-            Gate::Nand { left, right } => {
-                let x1 = self.evaluate_gate(left, fixed_values, offset);
-                let x2 = self.evaluate_gate(right, fixed_values, offset);
-                let z = !(x1 && x2);
-
-                *offset += (x1 as i32) * -4;
-                *offset += (x2 as i32) * -4;
-                *offset += (z as i32) * -6;
-
-                *offset += (x1 as i32) * (x2 as i32) * 2;
-                *offset += (x1 as i32) * (z as i32) * 4;
-                *offset += (x2 as i32) * (z as i32) * 4;
-
-                fixed_values.insert(key, z);
-                z
-            }
-            Gate::Matriarch1 { cond, right } => {
-                let x1 = self.evaluate_gate(cond, fixed_values, offset);
-                let x2 = self.evaluate_gate(right, fixed_values, offset);
-                let z = !x1 && x2;
-
-                *offset += (x2 as i32) * 2;
-                *offset += (z as i32) * 2;
-
-                *offset += (x1 as i32) * (x2 as i32) * -2;
-                *offset += (x1 as i32) * (z as i32) * 4;
-                *offset += (x2 as i32) * (z as i32) * -4;
-
-                fixed_values.insert(key, z);
-                z
-            }
-            Gate::Or { left, right } => {
-                let x1 = self.evaluate_gate(left, fixed_values, offset);
-                let x2 = self.evaluate_gate(right, fixed_values, offset);
-                let z = x1 || x2;
-
-                *offset += (x1 as i32) * 2;
-                *offset += (x2 as i32) * 2;
-                *offset += (z as i32) * 2;
-
-                *offset += (x1 as i32) * (x2 as i32) * 2;
-                *offset += (x1 as i32) * (z as i32) * -4;
-                *offset += (x2 as i32) * (z as i32) * -4;
-
-                fixed_values.insert(key, z);
-                z
-            }
-            Gate::ResultHalfAdder { input1, input2 } => {
-                let x1 = self.evaluate_gate(input1, fixed_values, offset);
-                let x2 = self.evaluate_gate(input2, fixed_values, offset);
-
-                let carry = x1 && x2;
-                let z = ((x1 as i32) + (x2 as i32) % 2) == 1;
-                let aux = (x1 && !x2) as i32;
-
-                *offset += (x1 as i32) * 2;
-                *offset += (x2 as i32) * 2;
-                *offset += (z as i32) * 2;
-                *offset += (aux as i32) * 4;
-                *offset += (carry as i32) * 4;
-
-                *offset += (carry as i32) * aux * 4;
-                *offset += (x1 as i32) * aux * -4;
-                *offset += (x1 as i32) * (carry as i32) * -4;
-                *offset += (x2 as i32) * aux * 4;
-                *offset += (x2 as i32) * (carry as i32) * -4;
-                *offset += (z as i32) * aux * -4;
-                *offset += (z as i32) * (carry as i32) * 4;
-                *offset += (x2 as i32) * (z as i32) * -4;
-
-                let carry_key = self.bitblasting.mapping_adders.get(&key).unwrap().clone();
-                fixed_values.insert(HashableGateRef::from(carry_key), carry);
-                fixed_values.insert(key, z);
-
-                z
-            }
-            Gate::ResultFullAdder {
-                input1,
-                input2,
-                input3,
-            } => {
-                let x1 = self.evaluate_gate(input1, fixed_values, offset) as i32;
-                let x2 = self.evaluate_gate(input2, fixed_values, offset) as i32;
-                let x3 = self.evaluate_gate(input3, fixed_values, offset) as i32;
-
-                let z = ((x1 + x2 + x3) % 2) == 1;
-                let carry = (x1 + x2 + x3) > 1;
-
-                // determine value of aux
-                let aux: i32;
-
-                if x1 == 0 {
-                    if x2 == 0 {
-                        aux = 0;
-                    } else if x3 == 0 {
-                        aux = 1;
-                    } else {
-                        aux = 0;
-                    }
-                } else if x2 == 1 {
-                    aux = 1;
-                } else if x3 == 1 {
-                    aux = 0;
-                } else {
-                    aux = 1;
-                }
-
-                *offset += x1 * 2;
-                *offset += x2 * 2;
-                *offset += x3 * 2;
-                *offset += (z as i32) * 2;
-                *offset += aux * 4;
-                *offset += (carry as i32) * 4;
-
-                *offset += x1 * aux * -4;
-                *offset += x1 * (carry as i32) * -4;
-                *offset += x2 * aux * -4;
-                *offset += x2 * (carry as i32) * -4;
-                *offset += x1 * x2 * 4;
-                *offset += x3 * aux * 4;
-                *offset += x3 * (carry as i32) * -4;
-                *offset += (z as i32) * aux * -4;
-                *offset += (z as i32) * (carry as i32) * 4;
-                *offset += x3 * (z as i32) * -4;
-
-                let carry_key = self.bitblasting.mapping_adders.get(&key).unwrap().clone();
-                fixed_values.insert(HashableGateRef::from(carry_key), carry as bool);
-                fixed_values.insert(key, z);
-
-                z
-            }
-            Gate::CarryHalfAdder { .. } => {
-                let gate_half_adder = self.bitblasting.mapping_adders.get(&key).unwrap();
-                self.evaluate_gate(gate_half_adder, fixed_values, offset);
-
-                *(fixed_values.get(&key).unwrap())
-            }
-            Gate::CarryFullAdder { .. } => {
-                let gate_full_adder = self.bitblasting.mapping_adders.get(&key).unwrap();
-                self.evaluate_gate(gate_full_adder, fixed_values, offset);
-
-                *(fixed_values.get(&key).unwrap())
-            }
+impl InputEvaluator {
+    pub fn new() -> Self {
+        Self {
+            fixed_qubits: HashMap::new(),
         }
     }
+    fn get_qubit_value(&mut self, z: &QubitRef, qubo: &Qubo) -> bool {
+        let key = HashableQubitRef::from(z.clone());
+        if let Some(value) = self.fixed_qubits.get(&key) {
+            return *value;
+        } else if let Some(value) = qubo.fixed_variables.get(&key) {
+            return *value;
+        }
+        let current_rule = qubo.rules.get(&key).unwrap();
+        match current_rule {
+            Rule::Not { x1 } => {
+                let value_x1 = self.get_qubit_value(x1, qubo);
+                self.fixed_qubits.insert(key, !value_x1);
+                !value_x1
+            }
+            Rule::And { x1, x2 }
+            | Rule::Nand { x1, x2 }
+            | Rule::Matriarch1 { x1, x2 }
+            | Rule::Or { x1, x2 }
+            | Rule::AuxHalfAdder { x1, x2 }
+            | Rule::CarryHalfAdder { x1, x2 }
+            | Rule::ResultHalfAdder { x1, x2 } => {
+                let value_x1 = self.get_qubit_value(x1, qubo);
+                let value_x2 = self.get_qubit_value(x2, qubo);
+                match current_rule {
+                    Rule::And { .. } | Rule::CarryHalfAdder { .. } => {
+                        self.fixed_qubits.insert(key, value_x1 && value_x2);
+                        value_x1 && value_x2
+                    }
+                    Rule::Nand { .. } => {
+                        self.fixed_qubits.insert(key, !(value_x1 && value_x2));
+                        !(value_x1 && value_x2)
+                    }
+                    Rule::Matriarch1 { .. } => {
+                        self.fixed_qubits.insert(key, !value_x1 && value_x2);
+                        !value_x1 && value_x2
+                    }
+                    Rule::Or { .. } => {
+                        self.fixed_qubits.insert(key, value_x1 || value_x2);
+                        value_x1 || value_x2
+                    }
+                    Rule::AuxHalfAdder { .. } => {
+                        self.fixed_qubits.insert(key, value_x1 && !value_x2);
+                        value_x1 && !value_x2
+                    }
+                    Rule::ResultHalfAdder { .. } => {
+                        self.fixed_qubits.insert(key, value_x1 != value_x2);
+                        value_x1 != value_x2
+                    }
+                    _ => {
+                        panic!("this rule should not happen!");
+                    }
+                }
+            }
+            Rule::AuxFullAdder { x1, x2, x3 }
+            | Rule::CarryFullAdder { x1, x2, x3 }
+            | Rule::ResultFullAdder { x1, x2, x3 } => {
+                let value_x1 = self.get_qubit_value(x1, qubo);
+                let value_x2 = self.get_qubit_value(x2, qubo);
+                let value_x3 = self.get_qubit_value(x3, qubo);
 
-    fn add_const_to_fixed_values(
-        &self,
-        fixed_values: &mut HashMap<HashableGateRef, bool>,
-        gates: &[GateRef],
-        mut value: i64,
-    ) {
-        for gate in gates {
-            let key = HashableGateRef::from((*gate).clone());
-            assert!(!fixed_values.contains_key(&key));
+                match current_rule {
+                    Rule::AuxFullAdder { .. } => {
+                        let aux: bool;
+                        if !value_x1 {
+                            if !value_x2 {
+                                aux = false;
+                            } else if !value_x3 {
+                                aux = true;
+                            } else {
+                                aux = false;
+                            }
+                        } else if value_x2 {
+                            aux = true;
+                        } else if value_x3 {
+                            aux = false;
+                        } else {
+                            aux = true;
+                        }
 
-            fixed_values.insert(key, value % 2 == 1);
-            value /= 2;
+                        self.fixed_qubits.insert(key, aux);
+                        aux
+                    }
+                    Rule::CarryFullAdder { .. } => {
+                        let result = (value_x1 as i32) + (value_x2 as i32) + (value_x3 as i32) > 1;
+                        self.fixed_qubits.insert(key, result);
+                        result
+                    }
+                    Rule::ResultFullAdder { .. } => {
+                        let result =
+                            (((value_x1 as i32) + (value_x2 as i32) + (value_x3 as i32)) % 2) == 1;
+                        self.fixed_qubits.insert(key, result);
+                        result
+                    }
+                    _ => {
+                        panic!("This rule should not be happening!");
+                    }
+                }
+            }
+            Rule::Invalid => {
+                panic!("[Input Evaluator] There is a dependency that cannot be resolved.")
+            }
         }
     }
 
     pub fn evaluate_inputs(
         &mut self,
-        bad_state_gates: &[GateRef],
+        qubo: &Qubo,
+        mapping: &HashMap<HashableGateRef, QubitRef>,
+        input_gates: &[(NodeRef, Vec<GateRef>)],
         input_values: &[i64],
-    ) -> (i32, Vec<NodeRef>) {
-        // the order of inputs values has to be the same as BitBlasting::input_gates
+        bad_states: Vec<(QubitRef, u64)>,
+    ) -> i32 {
+        assert!(input_gates.len() == input_values.len());
 
-        let mut true_bad_nids: Vec<NodeRef> = Vec::new();
-
-        let mut fixed_values: HashMap<HashableGateRef, bool> = HashMap::new();
-
-        for ((_, gates), value) in self.bitblasting.input_gates.iter().zip(input_values.iter()) {
-            self.add_const_to_fixed_values(&mut fixed_values, gates, *value);
-        }
-
-        let mut offset: i32 = self.qubo.offset;
-
-        for gate in bad_state_gates {
-            if self.evaluate_gate(gate, &mut fixed_values, &mut offset) {
-                let key = HashableGateRef::from(gate.clone());
-                true_bad_nids.push(
-                    self.bitblasting
-                        .gates_to_bad_nids
-                        .get(&key)
-                        .unwrap()
-                        .clone(),
-                );
+        // fix qubits that represent input
+        for (gates, value) in input_gates.iter().zip(input_values.iter()) {
+            let mut current_val = *value;
+            let gates: Vec<GateRef> = gates.1.to_vec();
+            for gate in gates {
+                let gate_key = HashableGateRef::from(gate);
+                let qubit_ref = &*(mapping.get(&gate_key).unwrap());
+                let qubit_key = HashableQubitRef::from(qubit_ref.clone());
+                self.fixed_qubits.insert(qubit_key, (current_val % 2) == 1);
+                current_val /= 2;
             }
         }
 
-        (offset, true_bad_nids)
+        // start solving QUBO
+        let mut offset = qubo.offset;
+
+        for (qubit_hash, coeff) in qubo.linear_coefficients.iter() {
+            let qubit_value = self.get_qubit_value(&qubit_hash.value, qubo) as i32;
+            offset += (*coeff) * qubit_value;
+        }
+
+        for (qubit_hash1, more_qubits) in qubo.quadratic_coefficients.iter() {
+            let value1 = self.get_qubit_value(&qubit_hash1.value, qubo) as i32;
+            for (qubit_hash2, coeff) in more_qubits.iter() {
+                if qubit_hash1.value.as_ptr() < qubit_hash2.value.as_ptr() {
+                    let value2 = self.get_qubit_value(&qubit_hash2.value, qubo) as i32;
+
+                    offset += value1 * value2 * coeff;
+                }
+            }
+        }
+
+        // which bad states happen? :
+        for (qubit, nid) in bad_states {
+            let value = self.get_qubit_value(&qubit, qubo);
+
+            if value {
+                println!("Bad state {} occurs", nid);
+            }
+        }
+
+        offset
     }
 }

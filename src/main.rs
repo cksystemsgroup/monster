@@ -9,8 +9,8 @@ use log::info;
 use modeler::bitblasting::BitBlasting;
 use modeler::builder::generate_model;
 use modeler::memory::replace_memory;
-use modeler::qubot::call_qubot;
 use modeler::optimize::optimize_model;
+use modeler::qubot::call_qubot;
 use modeler::solver::*;
 use modeler::unroller::{prune_model, renumber_model, unroll_model};
 use modeler::write_model;
@@ -224,14 +224,14 @@ fn main() -> Result<()> {
             } else {
                 write_model(&model, stdout())?;
             }
-
+            println!("Finished building model, starting bitblasting");
             let bitblasting_arg: Option<bool> = expect_optional_arg(args, "bitblasting")?;
 
             if let Some(do_bitblasting) = bitblasting_arg {
+                println!("bitblasting");
                 if do_bitblasting {
                     let mut bitblasting = BitBlasting::new(&model, true, 64);
                     let bad_states = bitblasting.process_model(&model);
-                    // let bad_states = bitblast_model(model, true, 64); // TODO: ask parameter to determine if bitblasting should do constant propagation, now it always do constant propagation
                     call_qubot(&bitblasting, &bad_states);
                 }
             }
