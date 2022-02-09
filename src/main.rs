@@ -7,6 +7,7 @@ use cli::{expect_arg, expect_optional_arg, LogLevel};
 use env_logger::{Env, TimestampPrecision};
 use log::info;
 use modeler::bitblasting::BitBlasting;
+use modeler::bitblasting_printer::print_gate_model;
 use modeler::builder::generate_model;
 use modeler::memory::replace_memory;
 use modeler::optimize::optimize_model;
@@ -224,14 +225,15 @@ fn main() -> Result<()> {
             } else {
                 write_model(&model, stdout())?;
             }
-            println!("Finished building model, starting bitblasting");
+            info!("Finished building model, starting bitblasting");
             let bitblasting_arg: Option<bool> = expect_optional_arg(args, "bitblasting")?;
 
             if let Some(do_bitblasting) = bitblasting_arg {
-                println!("bitblasting");
+                info!("bitblasting");
                 if do_bitblasting {
                     let mut bitblasting = BitBlasting::new(&model, true, 64);
                     let bad_states = bitblasting.process_model(&model);
+                    print_gate_model(&model, &bad_states);
                     call_qubot(&bitblasting, &bad_states);
                 }
             }

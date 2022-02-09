@@ -1,4 +1,5 @@
 use crate::modeler::{HashableNodeRef, Model, Node, NodeRef, NodeType};
+use log::{info, warn};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -728,7 +729,7 @@ impl<'a> BitBlasting<'a> {
         } else if self.model.stack_range.contains(address) {
             size_data + size_heap + (*address - self.model.stack_range.start) / self.word_size
         } else {
-            println!(
+            warn!(
                 "WARNING! trying to access address {} in memory that is undefined",
                 address
             );
@@ -778,7 +779,9 @@ impl<'a> BitBlasting<'a> {
             self.mapping.get(&key).cloned().unwrap()
         } else {
             assert!(!self.mapping.contains_key(&key));
-            self.process(node)
+            let replacement = self.process(node);
+            assert!(self.mapping.contains_key(&key));
+            replacement
         }
     }
 
@@ -827,7 +830,7 @@ impl<'a> BitBlasting<'a> {
                 init,
                 name: _,
             } => {
-                println!("normal state");
+                info!("normal state");
                 let mut replacement = Vec::new();
                 if let Some(value) = init {
                     replacement = self.visit(value);
@@ -865,6 +868,7 @@ impl<'a> BitBlasting<'a> {
             }
             Node::Ext { nid, from, value } => {
                 let mut replacement: Vec<GateRef> = self.visit(value);
+                assert!(replacement.len() == from.bitsize());
                 for _ in 0..(64 - from.bitsize()) {
                     replacement.push(GateRef::from(Gate::ConstFalse));
                 }
@@ -1198,7 +1202,7 @@ impl<'a> BitBlasting<'a> {
     pub fn process_model(&mut self, model: &Model) -> Vec<GateRef> {
         // returns bad state bits
         let mut bad_state_gates: Vec<GateRef> = Vec::new();
-        println!("initial bad {}", model.bad_states_initial.len());
+        info!("initial bad {}", model.bad_states_initial.len());
         for node in &model.bad_states_initial {
             let bitblasted_bad_state = self.process(node);
             bad_state_gates.push(bitblasted_bad_state[0].clone());
@@ -1355,7 +1359,7 @@ mod tests {
         assert!(and_gate(Some(false), Some(true), &const_false, &const_true) == const_false);
         assert!(and_gate(Some(false), None, &const_true, &var) == const_false);
         assert!(and_gate(Some(true), None, &const_true, &var) == var);
-        println!("{:?}", and_gate(None, None, &var, &var2));
+        info!("{:?}", and_gate(None, None, &var, &var2));
         assert!(
             and_gate(None, None, &var, &var2)
                 == GateRef::from(Gate::And {
