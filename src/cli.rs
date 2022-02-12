@@ -178,14 +178,6 @@ pub fn args() -> App<'static> {
                     .value_name("NUMBER")
                     .validator(is::<usize>),
                 )
-                .arg(
-                    Arg::new("bitblasting")
-                    .help("Perform bitblasting, default false") // TODO: generate bitblasting file, maybe move this to a separate command
-                    .short('b')
-                    .long("bitblasting")
-                    .takes_value(true)
-                    .validator(is::<bool>)
-                )
         )
         .subcommand(
             App::new("smt")

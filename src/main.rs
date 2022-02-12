@@ -221,6 +221,7 @@ fn main() -> Result<()> {
 
             if bitblast {
                 info!("Finished building model, starting bitblasting");
+                renumber_model(&mut model);
                 let mut bitblasting = BitBlasting::new(&model, true, 64);
                 let bad_states = bitblasting.process_model(&model);
                 if let Some(ref output_path) = output {
@@ -229,7 +230,7 @@ fn main() -> Result<()> {
                 } else {
                     write_gate_model(&model, &bad_states, stdout())?;
                 }
-                // TODO: call_qubot(&bitblasting, &bad_states);
+                call_qubot(&bitblasting, &bad_states); // TODO
             } else {
                 renumber_model(&mut model);
                 if let Some(ref output_path) = output {
@@ -237,18 +238,6 @@ fn main() -> Result<()> {
                     write_model(&model, file)?;
                 } else {
                     write_model(&model, stdout())?;
-                }
-            }
-            println!("Finished building model, starting bitblasting");
-            let bitblasting_arg: Option<bool> = expect_optional_arg(args, "bitblasting")?;
-
-            if let Some(do_bitblasting) = bitblasting_arg {
-                renumber_model(&mut model);
-                println!("bitblasting");
-                if do_bitblasting {
-                    let mut bitblasting = BitBlasting::new(&model, true, 64);
-                    let bad_states = bitblasting.process_model(&model);
-                    call_qubot(&bitblasting, &bad_states);
                 }
             }
             Ok(())
