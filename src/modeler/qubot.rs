@@ -27,13 +27,13 @@ pub fn call_qubot<'a>(model: &'a BitBlasting<'a>, bad_states: &[GateRef]) {
     //     }
     // }
 
-    let target_gates = qubo.bitblasting.nid_to_gates.get(&10000000).unwrap();
-    println!("{:?}", target_gates[0]);
-    for gate_ in target_gates {
-        let key = HashableGateRef::from(gate_.clone());
-        println!("{}", qubo.mapping.contains_key(&key));
-    }
-    println!("********************\n");
+    // let target_gates = qubo.bitblasting.nid_to_gates.get(&10000000).unwrap();
+    // println!("{:?}", target_gates[0]);
+    // for gate_ in target_gates {
+    //     let key = HashableGateRef::from(gate_.clone());
+    //     println!("{}", qubo.mapping.contains_key(&key));
+    // }
+    // println!("********************\n");
 
     println!(
         "{} variables, {}",
@@ -56,7 +56,7 @@ pub fn call_qubot<'a>(model: &'a BitBlasting<'a>, bad_states: &[GateRef]) {
     // println!("{} / {}", count_not_present, total_gates);
     // evaluate inputs
     println!("num inputs: {}", model.input_gates.len());
-    let input_gates_values: Vec<i64> = vec![0; qubo.bitblasting.input_gates.len()];
+    let input_gates_values: Vec<i64> = vec![49; qubo.bitblasting.input_gates.len()];
 
     let mut input_evaluator = InputEvaluator::new();
     let final_offset = input_evaluator.evaluate_inputs(
@@ -380,10 +380,10 @@ impl<'a> Qubot<'a> {
     }
 
     pub fn process_gate(&mut self, gate: &GateRef) -> QubitRef {
-        let target_gates = self.bitblasting.nid_to_gates.get(&10003276).unwrap();
-        if HashableGateRef::from(gate.clone()) == HashableGateRef::from(target_gates[0].clone()) {
-            println!("index 0 visited");
-        }
+        // let target_gates = self.bitblasting.nid_to_gates.get(&10003276).unwrap();
+        // if HashableGateRef::from(gate.clone()) == HashableGateRef::from(target_gates[0].clone()) {
+        //     println!("index 0 visited");
+        // }
 
         if let Some(replacement) = self.query_existence(gate) {
             return replacement;

@@ -228,6 +228,7 @@ fn main() -> Result<()> {
             let bitblasting_arg: Option<bool> = expect_optional_arg(args, "bitblasting")?;
 
             if let Some(do_bitblasting) = bitblasting_arg {
+                renumber_model(&mut model);
                 println!("bitblasting");
                 if do_bitblasting {
                     let mut bitblasting = BitBlasting::new(&model, true, 64);
