@@ -952,9 +952,7 @@ impl<'a> BitBlasting<'a> {
                                 if const_true {
                                     true_bit = cond_operand[0].clone();
                                 } else {
-                                    true_bit = GateRef::from(Gate::Not {
-                                        value: cond_operand[0].clone(),
-                                    });
+                                    true_bit = GateRef::from(Gate::ConstFalse);
                                 }
                             } else {
                                 true_bit = GateRef::from(Gate::And {
