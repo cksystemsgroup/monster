@@ -55,52 +55,61 @@ pub fn call_qubot<'a>(model: &'a BitBlasting<'a>, bad_states: &[GateRef]) {
     // }
     // println!("{} / {}", count_not_present, total_gates);
     // evaluate inputs
-    println!("num inputs: {}", model.input_gates.len());
-    let input_gates_values: Vec<i64> = vec![49; qubo.bitblasting.input_gates.len()];
+    for i in 0..256 {
+        let input_gates_values: Vec<i64> = vec![i; qubo.bitblasting.input_gates.len()];
 
-    let mut input_evaluator = InputEvaluator::new();
-    let final_offset = input_evaluator.evaluate_inputs(
-        &qubo.qubo,
-        &qubo.mapping,
-        &qubo.bitblasting.input_gates,
-        &input_gates_values,
-        bad_state_qubits,
-    );
-
-    for (nid, gates) in model.nid_to_gates.iter() {
-        let mut temp = 0;
-        let mut is_valid = true;
-        for (i, gate) in gates.iter().enumerate() {
-            let gate_key = HashableGateRef::from(gate.clone());
-            if qubo.mapping.get(&gate_key).is_none() {
-                if *gate == GateRef::from(Gate::ConstFalse) {
-                    println!("{} -> unk (0)", nid);
-                } else if *gate == GateRef::from(Gate::ConstTrue) {
-                    println!("{} -> unk (1)", nid);
-                } else {
-                    println!("{} -> unk", nid);
-                }
-
-                is_valid = false;
-                break;
-            }
-            let qubit_ref = qubo.mapping.get(&gate_key).unwrap();
-
-            let qubit_key = HashableQubitRef::from(qubit_ref.clone());
-            if let Some(variable_value) = input_evaluator.fixed_qubits.get(&qubit_key) {
-                temp += (2_u64).pow(i as u32) * (*variable_value as u64);
-            } else {
-                let variable_value = *qubo.qubo.fixed_variables.get(&qubit_key).unwrap() as u64;
-                temp += (2_u64).pow(i as u32) * (variable_value);
-            }
-        }
-
-        if is_valid {
-            println!("{} -> {}", nid, temp);
+        let mut input_evaluator = InputEvaluator::new();
+        let (final_offset, true_bad_states) = input_evaluator.evaluate_inputs(
+            &qubo.qubo,
+            &qubo.mapping,
+            &qubo.bitblasting.input_gates,
+            &input_gates_values,
+            bad_state_qubits.clone(),
+        );
+        println!("{} -> {} {}", i, final_offset, true_bad_states.len());
+        if i == 49 {
+            assert!(final_offset == 0);
+            assert!(true_bad_states.len() == 1);
+            assert!(true_bad_states[0] == 10004216);
+        } else {
+            assert!(final_offset == 2);
+            assert!(true_bad_states.is_empty());
         }
     }
+    // println!("num inputs: {}", model.input_gates.len());
 
-    println!("final offset: {}", final_offset);
+    // for (nid, gates) in model.nid_to_gates.iter() {
+    //     let mut temp = 0;
+    //     let mut is_valid = true;
+    //     for (i, gate) in gates.iter().enumerate() {
+    //         let gate_key = HashableGateRef::from(gate.clone());
+    //         if qubo.mapping.get(&gate_key).is_none() {
+    //             if *gate == GateRef::from(Gate::ConstFalse) {
+    //                 println!("{} -> unk (0)", nid);
+    //             } else if *gate == GateRef::from(Gate::ConstTrue) {
+    //                 println!("{} -> unk (1)", nid);
+    //             } else {
+    //                 println!("{} -> unk", nid);
+    //             }
+
+    //             is_valid = false;
+    //             break;
+    //         }
+    //         let qubit_ref = qubo.mapping.get(&gate_key).unwrap();
+
+    //         let qubit_key = HashableQubitRef::from(qubit_ref.clone());
+    //         if let Some(variable_value) = input_evaluator.fixed_qubits.get(&qubit_key) {
+    //             temp += (2_u64).pow(i as u32) * (*variable_value as u64);
+    //         } else {
+    //             let variable_value = *qubo.qubo.fixed_variables.get(&qubit_key).unwrap() as u64;
+    //             temp += (2_u64).pow(i as u32) * (variable_value);
+    //         }
+    //     }
+
+    //     if is_valid {
+    //         println!("{} -> {}", nid, temp);
+    //     }
+    // }
 }
 
 #[derive(Debug, PartialEq)]
@@ -802,7 +811,7 @@ impl InputEvaluator {
         input_gates: &[(NodeRef, Vec<GateRef>)],
         input_values: &[i64],
         bad_states: Vec<(QubitRef, u64)>,
-    ) -> i32 {
+    ) -> (i32, Vec<u64>) {
         assert!(input_gates.len() == input_values.len());
 
         // fix qubits that represent input
@@ -837,15 +846,15 @@ impl InputEvaluator {
             }
         }
 
+        let mut true_bad_states = vec![];
         // which bad states happen? :
         for (qubit, nid) in bad_states {
             let value = self.get_qubit_value(&qubit, qubo);
-
             if value {
-                println!("Bad state {} occurs", nid);
+                true_bad_states.push(nid);
             }
         }
 
-        offset
+        (offset, true_bad_states)
     }
 }
