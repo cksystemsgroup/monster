@@ -392,7 +392,7 @@ impl<'a> Qubot<'a> {
         match &*gate.borrow() {
             Gate::ConstTrue {} => self.record_mapping(gate, self.const_true_qubit.clone()),
             Gate::ConstFalse {} => self.record_mapping(gate, self.const_false_qubit.clone()),
-            Gate::InputBit {} => {
+            Gate::InputBit { name: _ } => {
                 let new_qubit = QubitRef::from(RefCell::new(Qubit {
                     name: self.get_current_index(),
                 }));

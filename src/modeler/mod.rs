@@ -1,6 +1,5 @@
 use anyhow::Result;
 use std::cell::RefCell;
-use std::collections::LinkedList;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::Range;
@@ -11,6 +10,7 @@ use std::rc::Rc;
 //
 
 pub mod bitblasting;
+pub mod bitblasting_printer;
 pub mod builder;
 pub mod memory;
 pub mod optimize;
@@ -136,8 +136,7 @@ pub enum NodeType {
 
 #[derive(Debug)]
 pub struct Model {
-    // TODO: Switch from `LinkedList` to `Vec` here.
-    pub lines: LinkedList<NodeRef>,
+    pub lines: Vec<NodeRef>,
     pub sequentials: Vec<NodeRef>,
     pub bad_states_initial: Vec<NodeRef>,
     pub bad_states_sequential: Vec<NodeRef>,
@@ -147,7 +146,7 @@ pub struct Model {
     pub memory_size: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct HashableNodeRef {
     value: NodeRef,
 }
