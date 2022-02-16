@@ -119,15 +119,15 @@ impl Qubo {
     }
 
     pub fn get_count_variables(&self) -> usize {
-        let set1: HashSet<usize> = self
+        let set1: HashSet<u64> = self
             .linear_coefficients
             .keys()
-            .map(|x| (*x).value.as_ptr() as usize)
+            .map(|x| (*x).value.borrow().name)
             .collect();
-        let set2: HashSet<usize> = self
+        let set2: HashSet<u64> = self
             .quadratic_coefficients
             .keys()
-            .map(|x| (*x).value.as_ptr() as usize)
+            .map(|x| (*x).value.borrow().name)
             .collect();
 
         set1.union(&set2).count()
@@ -172,7 +172,7 @@ impl Qubo {
     pub fn add_quadratic_coeffs(&mut self, qubit1: &QubitRef, qubit2: &QubitRef, value: i32) {
         if value == 0 {
             return;
-        } else if qubit1.as_ptr() == qubit2.as_ptr() {
+        } else if qubit1.borrow().name == qubit2.borrow().name {
             return self.add_linear_coeff(qubit1, value);
         }
 
@@ -266,9 +266,7 @@ impl<'a> Qubot<'a> {
                 if !str_gates.is_empty() {
                     str_gates += " ";
                 }
-                unsafe {
-                    str_gates += &(*qubit.as_ptr()).name.to_string();
-                }
+                str_gates += &(*qubit.borrow()).name.to_string();
             }
             writeln!(out, "{} {:?}", get_nid(nid), str_gates)?;
         }
@@ -276,31 +274,25 @@ impl<'a> Qubot<'a> {
         writeln!(out)?;
 
         for (qubit, nid) in bad_state_qubits {
-            unsafe {
-                writeln!(out, "{} {}", nid, (*qubit.as_ptr()).name)?;
-            }
+            writeln!(out, "{} {}", nid, (*qubit.borrow()).name)?;
         }
 
         writeln!(out)?;
 
         for (qubit, coeff) in self.qubo.linear_coefficients.iter() {
-            unsafe {
-                let id = (*qubit.value.as_ptr()).name;
-                writeln!(out, "{} {}", id, *coeff)?;
-            }
+            let id = (*qubit.value.borrow()).name;
+            writeln!(out, "{} {}", id, *coeff)?;
         }
 
         writeln!(out)?;
         for (qubit1, edges) in self.qubo.quadratic_coefficients.iter() {
-            unsafe {
-                let id1 = (*qubit1.value.as_ptr()).name;
+            let id1 = (*qubit1.value.borrow()).name;
 
-                for (qubit2, coeff) in edges.iter() {
-                    let id2 = (*qubit2.value.as_ptr()).name;
+            for (qubit2, coeff) in edges.iter() {
+                let id2 = (*qubit2.value.borrow()).name;
 
-                    if id1 < id2 {
-                        writeln!(out, "{} {} {}", id1, id2, *coeff)?;
-                    }
+                if id1 < id2 {
+                    writeln!(out, "{} {} {}", id1, id2, *coeff)?;
                 }
             }
         }
@@ -803,7 +795,7 @@ impl InputEvaluator {
         for (qubit_hash1, more_qubits) in qubo.quadratic_coefficients.iter() {
             let value1 = self.get_qubit_value(&qubit_hash1.value, qubo) as i32;
             for (qubit_hash2, coeff) in more_qubits.iter() {
-                if qubit_hash1.value.as_ptr() < qubit_hash2.value.as_ptr() {
+                if qubit_hash1.value.borrow().name < qubit_hash2.value.borrow().name {
                     let value2 = self.get_qubit_value(&qubit_hash2.value, qubo) as i32;
 
                     offset += value1 * value2 * coeff;
