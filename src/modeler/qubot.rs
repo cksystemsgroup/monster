@@ -2,7 +2,7 @@ use crate::modeler::bitblasting::BitBlasting;
 use crate::modeler::bitblasting::HashableGateRef;
 use crate::modeler::bitblasting::{Gate, GateRef};
 use crate::modeler::get_nid;
-use crate::modeler::NodeRef;
+use crate::modeler::{HashableNodeRef, NodeRef};
 use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -97,6 +97,16 @@ pub enum Rule {
         x3: QubitRef,
     },
     Invalid,
+    Quotient {
+        dividend: Vec<QubitRef>,
+        divisor: Vec<QubitRef>,
+        index: u32,
+    },
+    Remainder {
+        dividend: Vec<QubitRef>,
+        divisor: Vec<QubitRef>,
+        index: u32,
+    },
 }
 
 pub struct Qubo {
@@ -311,7 +321,7 @@ impl<'a> Qubot<'a> {
         self.mapping_carries.insert(key, qubit_carry);
     }
 
-    pub fn query_existence(&self, gate: &GateRef) -> Option<QubitRef> {
+    pub fn _query_existence(&self, gate: &GateRef) -> Option<QubitRef> {
         let key = HashableGateRef::from(gate.clone());
         if self.mapping.contains_key(&key) {
             self.mapping.get(&key).cloned()
@@ -341,15 +351,6 @@ impl<'a> Qubot<'a> {
     }
 
     pub fn process_gate(&mut self, gate: &GateRef) -> QubitRef {
-        // let target_gates = self.bitblasting.nid_to_gates.get(&10003276).unwrap();
-        // if HashableGateRef::from(gate.clone()) == HashableGateRef::from(target_gates[0].clone()) {
-        //     println!("index 0 visited");
-        // }
-
-        if let Some(replacement) = self.query_existence(gate) {
-            return replacement;
-        }
-
         match &*gate.borrow() {
             Gate::ConstTrue {} => self.record_mapping(gate, self.const_true_qubit.clone()),
             Gate::ConstFalse {} => self.record_mapping(gate, self.const_false_qubit.clone()),
@@ -358,6 +359,76 @@ impl<'a> Qubot<'a> {
                     name: self.get_current_index(),
                 }));
                 self.qubo.add_rule(&new_qubit, Rule::Invalid);
+                self.record_mapping(gate, new_qubit)
+            }
+            Gate::Quotient { index, .. } => {
+                let new_qubit = QubitRef::from(RefCell::new(Qubit {
+                    name: self.get_current_index(),
+                }));
+
+                let gate_key = HashableGateRef::from(gate.clone());
+                let nodes = self
+                    .bitblasting
+                    .constraint_based_dependencies
+                    .get(&gate_key)
+                    .unwrap();
+                let mut dividend: Vec<QubitRef> = Vec::new();
+
+                let mut node_key = HashableNodeRef::from(nodes.0.clone());
+                let mut temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
+                for t_gate in temp_gates {
+                    dividend.push(self.visit(t_gate));
+                }
+
+                let mut divisor: Vec<QubitRef> = Vec::new();
+                node_key = HashableNodeRef::from(nodes.1.clone());
+                temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
+                for t_gate in temp_gates {
+                    divisor.push(self.visit(t_gate));
+                }
+                self.qubo.add_rule(
+                    &new_qubit,
+                    Rule::Quotient {
+                        dividend,
+                        divisor,
+                        index: *index,
+                    },
+                );
+                self.record_mapping(gate, new_qubit)
+            }
+            Gate::Remainder { index, .. } => {
+                let new_qubit = QubitRef::from(RefCell::new(Qubit {
+                    name: self.get_current_index(),
+                }));
+
+                let gate_key = HashableGateRef::from(gate.clone());
+                let nodes = self
+                    .bitblasting
+                    .constraint_based_dependencies
+                    .get(&gate_key)
+                    .unwrap();
+                let mut dividend: Vec<QubitRef> = Vec::new();
+
+                let mut node_key = HashableNodeRef::from(nodes.0.clone());
+                let mut temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
+                for t_gate in temp_gates {
+                    dividend.push(self.visit(t_gate));
+                }
+
+                let mut divisor: Vec<QubitRef> = Vec::new();
+                node_key = HashableNodeRef::from(nodes.1.clone());
+                temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
+                for t_gate in temp_gates {
+                    divisor.push(self.visit(t_gate));
+                }
+                self.qubo.add_rule(
+                    &new_qubit,
+                    Rule::Remainder {
+                        dividend,
+                        divisor,
+                        index: *index,
+                    },
+                );
                 self.record_mapping(gate, new_qubit)
             }
             Gate::Not { value } => {
@@ -657,6 +728,19 @@ impl InputEvaluator {
             fixed_qubits: HashMap::new(),
         }
     }
+
+    fn get_numeric_value(&mut self, qubits: &[QubitRef], qubo: &Qubo) -> u64 {
+        let mut result = 0;
+        let mut current_power = 1;
+        for qubit in qubits {
+            if self.get_qubit_value(qubit, qubo) {
+                result += current_power;
+            }
+            current_power *= 2;
+        }
+        result
+    }
+
     fn get_qubit_value(&mut self, z: &QubitRef, qubo: &Qubo) -> bool {
         let key = HashableQubitRef::from(z.clone());
         if let Some(value) = self.fixed_qubits.get(&key) {
@@ -670,6 +754,38 @@ impl InputEvaluator {
                 let value_x1 = self.get_qubit_value(x1, qubo);
                 self.fixed_qubits.insert(key, !value_x1);
                 !value_x1
+            }
+            Rule::Quotient {
+                dividend,
+                divisor,
+                index,
+            }
+            | Rule::Remainder {
+                dividend,
+                divisor,
+                index,
+            } => {
+                let dividend_value = self.get_numeric_value(dividend, qubo);
+                let divisor_value = self.get_numeric_value(divisor, qubo);
+
+                let mut result: u64;
+
+                match current_rule {
+                    Rule::Quotient { .. } => {
+                        result = dividend_value / divisor_value;
+                    }
+                    Rule::Remainder { .. } => {
+                        result = dividend_value % divisor_value;
+                    }
+                    _ => {
+                        panic!("[RULE DIVISION/REMAINDER]this should not happen!");
+                    }
+                }
+
+                for _ in 0..*index {
+                    result /= 2
+                }
+                result % 2 == 1
             }
             Rule::And { x1, x2 }
             | Rule::Nand { x1, x2 }
