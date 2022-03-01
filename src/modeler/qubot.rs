@@ -321,15 +321,6 @@ impl<'a> Qubot<'a> {
         self.mapping_carries.insert(key, qubit_carry);
     }
 
-    pub fn _query_existence(&self, gate: &GateRef) -> Option<QubitRef> {
-        let key = HashableGateRef::from(gate.clone());
-        if self.mapping.contains_key(&key) {
-            self.mapping.get(&key).cloned()
-        } else {
-            None
-        }
-    }
-
     fn visit(&mut self, gate: &GateRef) -> QubitRef {
         let key = HashableGateRef::from(gate.clone());
 
@@ -372,20 +363,16 @@ impl<'a> Qubot<'a> {
                     .constraint_based_dependencies
                     .get(&gate_key)
                     .unwrap();
-                let mut dividend: Vec<QubitRef> = Vec::new();
+                
 
                 let mut node_key = HashableNodeRef::from(nodes.0.clone());
                 let mut temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
-                for t_gate in temp_gates {
-                    dividend.push(self.visit(t_gate));
-                }
+                let dividend = temp_gates.iter().map(|g| self.visit(g)).collect();
 
-                let mut divisor: Vec<QubitRef> = Vec::new();
                 node_key = HashableNodeRef::from(nodes.1.clone());
                 temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
-                for t_gate in temp_gates {
-                    divisor.push(self.visit(t_gate));
-                }
+                let divisor = temp_gates.iter().map(|g| self.visit(g)).collect();
+            
                 self.qubo.add_rule(
                     &new_qubit,
                     Rule::Quotient {
