@@ -1219,7 +1219,6 @@ impl<'a> BitBlasting<'a> {
             let key = HashableGateRef::from(bitblasted_bad_state[0].clone());
             self.gates_to_bad_nids.insert(key, node.clone());
         }
-
         bad_state_gates
     }
 }
