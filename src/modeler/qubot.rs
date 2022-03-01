@@ -363,7 +363,6 @@ impl<'a> Qubot<'a> {
                     .constraint_based_dependencies
                     .get(&gate_key)
                     .unwrap();
-                
 
                 let mut node_key = HashableNodeRef::from(nodes.0.clone());
                 let mut temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
@@ -372,7 +371,7 @@ impl<'a> Qubot<'a> {
                 node_key = HashableNodeRef::from(nodes.1.clone());
                 temp_gates = self.bitblasting.mapping.get(&node_key).unwrap();
                 let divisor = temp_gates.iter().map(|g| self.visit(g)).collect();
-            
+
                 self.qubo.add_rule(
                     &new_qubit,
                     Rule::Quotient {
