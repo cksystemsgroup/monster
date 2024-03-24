@@ -5,8 +5,8 @@ authors = ["Christian Mösl <christian.moesl@live.at>"]
 edition = "2018"
 
 [dependencies]
-rayon = "~1.5"
-tempfile = "~3.3"
-which = "~4.2"
-log = "~0.4"
-env_logger = "~0.9"
+rayon = "~1.10.0"
+tempfile = "~3.10.1"
+which = "~4.4.2"
+log = "~0.4.21"
+env_logger = "~0.11.3"
